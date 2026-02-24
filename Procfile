@@ -1,0 +1,1 @@
+worker: mkdir -p /app/bin && cd /app/bin && curl -L -o bento4.zip "https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-unknown-linux.zip" && unzip -o bento4.zip && cp Bento4-SDK-1-6-0-641.x86_64-unknown-linux/bin/mp4decrypt . && chmod +x mp4decrypt && rm -rf bento4.zip Bento4-SDK-1-6-0-641.x86_64-unknown-linux && cd /app && PATH=$PATH:/app/bin python3 main.py
