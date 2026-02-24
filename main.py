@@ -919,7 +919,7 @@ async def txt_handler(bot: Client, m: Message):
             try:
                 cc = (
                     f"<b>ꕥ 𝗡𝗮𝗺𝗲 ➾ {cleaned_name1}</b>\n\n"
-                    f"<b>🎬 𝗤𝘂𝗮𝗹𝗶𝘁𝘆 ➾ {raw_text97}</b>\n\n"                
+                    f"<b>🎬 𝗤𝘂𝗮𝗹𝗶𝘁𝘆 ➾ {raw_text97}p</b>\n\n"                
                     f"<b>📚 𝗦𝘂𝗯𝗷𝗲𝗰𝘁 ➾ {raw_text65}</b>\n\n"
                     f"<b>🗃️ 𝗕𝗮𝘁𝗰𝗵 ➾ {b_name}</b>"
                 )
