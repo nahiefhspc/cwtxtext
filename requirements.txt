@@ -40,6 +40,7 @@ sqlalchemy
 async-lru==2.0.2
 certifi
 curl_cffi
+httpx[http2]
 
 # Flask App (optional if using webhook/server)
 Flask
