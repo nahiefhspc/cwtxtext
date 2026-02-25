@@ -965,39 +965,75 @@ async def txt_handler(bot: Client, m: Message):
                                 await asyncio.sleep(retry_delay)
                                 url = url.replace(" ", "%20")
                 
-                                # curl_cffi automatically bypasses Cloudflare
-                                response = curl_requests.get(
-                                    url,
-                                    impersonate="chrome110",  # Impersonate Chrome browser
-                                    timeout=30
-                                )
+                                # Extract domain and path
+                                domain_match = re.search(r'https?://([^/]+)', url)
+                                domain = domain_match.group(1) if domain_match else "cwmediabkt99.crwilladmin.com"
                 
-                                if response.status_code == 200:
-                                    with open(f'{name}.pdf', 'wb') as file:
-                                        file.write(response.content)
+                                # Proper headers for this specific domain
+                                headers = {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                    'Accept': 'application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                    'Accept-Language': 'en-US,en;q=0.9',
+                                    'Accept-Encoding': 'gzip, deflate, br',
+                                    'Referer': f'https://{domain}/',  # Important!
+                                    'Origin': f'https://{domain}',
+                                    'Connection': 'keep-alive',
+                                    'Sec-Fetch-Dest': 'document',
+                                    'Sec-Fetch-Mode': 'navigate',
+                                    'Sec-Fetch-Site': 'same-origin',
+                                    'Sec-Fetch-User': '?1',
+                                    'Upgrade-Insecure-Requests': '1',
+                                    'Cache-Control': 'max-age=0',
+                                    'DNT': '1',
+                                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                                    'sec-ch-ua-mobile': '?0',
+                                    'sec-ch-ua-platform': '"Windows"',
+                                }
+                
+                                async with httpx.AsyncClient(
+                                    http2=True,
+                                    follow_redirects=True,
+                                    timeout=60.0,
+                                    verify=False  # SSL verification disable
+                                ) as client:
+                                    response = await client.get(url, headers=headers)
                     
-                                    await asyncio.sleep(retry_delay)
-                                    copy = await bot.send_document(chat_id=channel_id, document=f'{name}.pdf', caption=cc1)
-                                    count += 1
-                                    os.remove(f'{name}.pdf')
-                                    success = True
-                                    break
-                                else:
-                                    failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {response.status_code}")
-                                    failure_msgs.append(failure_msg)
+                                    if response.status_code == 200:
+                                        # Verify it's a PDF
+                                        content_type = response.headers.get('content-type', '')
+                                        if 'pdf' in content_type.lower() or response.content[:4] == b'%PDF':
+                                            with open(f'{name}.pdf', 'wb') as file:
+                                                file.write(response.content)
+                            
+                                            await asyncio.sleep(retry_delay)
+                                            copy = await bot.send_document(chat_id=channel_id, document=f'{name}.pdf', caption=cc1)
+                                            count += 1
+                                            os.remove(f'{name}.pdf')
+                                            success = True
+                                            break
+                                        else:
+                                            failure_msg = await m.reply_text(f"⚠️ Attempt {attempt + 1}/{max_retries}: Got {content_type} instead of PDF")
+                                            failure_msgs.append(failure_msg)
+                                    else:
+                                        failure_msg = await m.reply_text(f"❌ Attempt {attempt + 1}/{max_retries}: {response.status_code}")
+                                        failure_msgs.append(failure_msg)
+                    
                                     await asyncio.sleep(retry_delay * (attempt + 1))
                     
                             except Exception as e:
-                                failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+                                failure_msg = await m.reply_text(f"❌ Attempt {attempt + 1}/{max_retries}: {str(e)[:100]}")
                                 failure_msgs.append(failure_msg)
                                 await asyncio.sleep(retry_delay * (attempt + 1))
                                 continue
         
                         for msg in failure_msgs:
-                            await msg.delete()
+                            try:
+                                await msg.delete()
+                            except:
+                                pass
         
                         if not success:
-                            await m.reply_text("❌ Download failed after all retries")
+                            await m.reply_text("❌ Download failed. URL might be expired or protected.")
                             
                     else:
                         try:
