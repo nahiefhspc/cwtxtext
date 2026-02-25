@@ -55,7 +55,7 @@ from pyrogram.errors import (
     RPCError
 )
 from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified
-
+from curl_cffi import requests as curl_requests
 # 🧠 Bot Modules
 import auth
 import itsgolu as helper
@@ -949,40 +949,55 @@ async def txt_handler(bot: Client, m: Message):
                         time.sleep(e.x)
                         continue    
   
-                elif ".pdf" in url:
-                    if "cwmediabkt99" in url:
-                        max_retries = 3
-                        retry_delay = 4
-                        success = False
-                        failure_msgs = []
-                        
-                        for attempt in range(max_retries):
-                            try:
-                                await asyncio.sleep(retry_delay)
-                                url = url.replace(" ", "%20")
-                                scraper = cloudscraper.create_scraper()
-                                response = scraper.get(url)
+                # Install: pip install curl-cffi
 
-                                if response.status_code == 200:
-                                    with open(f'{name}.pdf', 'wb') as file:
-                                        file.write(response.content)
-                                    await asyncio.sleep(retry_delay)
-                                    copy = await bot.send_document(chat_id=channel_id, document=f'{name}.pdf', caption=cc1)
-                                    count += 1
-                                    os.remove(f'{name}.pdf')
-                                    success = True
-                                    break
-                                else:
-                                    failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {response.status_code} {response.reason}")
-                                    failure_msgs.append(failure_msg)
-                                    
-                            except Exception as e:
-                                failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}")
-                                failure_msgs.append(failure_msg)
+
+
+            elif ".pdf" in url:
+                if "cwmediabkt99" in url:
+                    max_retries = 3
+                    retry_delay = 4
+                    success = False
+                    failure_msgs = []
+        
+                    for attempt in range(max_retries):
+                        try:
+                            await asyncio.sleep(retry_delay)
+                            url = url.replace(" ", "%20")
+                
+                            # curl_cffi automatically bypasses Cloudflare
+                            response = curl_requests.get(
+                                url,
+                                impersonate="chrome110",  # Impersonate Chrome browser
+                                timeout=30
+                            )
+                
+                            if response.status_code == 200:
+                                with open(f'{name}.pdf', 'wb') as file:
+                                    file.write(response.content)
+                    
                                 await asyncio.sleep(retry_delay)
-                                continue 
-                        for msg in failure_msgs:
-                            await msg.delete()
+                                copy = await bot.send_document(chat_id=channel_id, document=f'{name}.pdf', caption=cc1)
+                                count += 1
+                                os.remove(f'{name}.pdf')
+                                success = True
+                                break
+                            else:
+                                failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {response.status_code}")
+                                failure_msgs.append(failure_msg)
+                                await asyncio.sleep(retry_delay * (attempt + 1))
+                    
+                        except Exception as e:
+                            failure_msg = await m.reply_text(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+                            failure_msgs.append(failure_msg)
+                            await asyncio.sleep(retry_delay * (attempt + 1))
+                            continue
+        
+                    for msg in failure_msgs:
+                        await msg.delete()
+        
+                    if not success:
+                        await m.reply_text("❌ Download failed after all retries")
                             
                     else:
                         try:
