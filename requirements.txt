@@ -39,7 +39,7 @@ umongo
 sqlalchemy
 async-lru==2.0.2
 certifi
-
+curl_cffi
 
 # Flask App (optional if using webhook/server)
 Flask
