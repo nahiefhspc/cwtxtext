@@ -412,31 +412,41 @@ async def fast_download(url, name):
 
 # ✅ FAST download_video with -N 64
 
-
 async def download_video(url, cmd, name):
     retry_count = 0
     max_retries = 3
 
     while retry_count < max_retries:
-
-        # 🧹 Remove old fragment files
-        for f in glob.glob("*.part*"):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
+        # 🔥 Clean ALL partial/temp files before each attempt
+        base_name = name.split(".")[0]
+        patterns = [
+            f"{name}.part*",
+            f"{name}.temp*", 
+            f"{name}.ytdl",
+            f"{base_name}*.part*",
+            f"{base_name}*.temp*",
+            f"{base_name}*.ytdl",
+        ]
+        for pattern in patterns:
+            for f in glob.glob(pattern):
+                try:
+                    os.remove(f)
+                    print(f"🗑️ Removed: {f}")
+                except:
+                    pass
 
         if "m3u8" in url:
             download_cmd = (
                 f'{cmd} '
                 f'-R 50 --fragment-retries 50 '
                 f'--socket-timeout 120 '
-                f'--concurrent-fragments 12 '
+                f'--concurrent-fragments 16 '
                 f'-N 32 '
-                f'--buffer-size 1M '
+                f'--buffer-size 512K '
                 f'--http-chunk-size 10M '
-                f'--force-ipv4 '
-                f'--no-check-certificates'
+                f'--no-check-certificates '
+                f'--force-overwrites '
+                f'--no-part'
             )
 
         elif "mpd" in url:
@@ -450,63 +460,63 @@ async def download_video(url, cmd, name):
                 f'-x 16 -j 32 -s 16 -k 1M '
                 f'--file-allocation=none '
                 f'--async-dns=true" '
-                f'--buffer-size 1M '
+                f'--buffer-size 512K '
                 f'--http-chunk-size 10M '
-                f'--force-ipv4 '
-                f'--no-check-certificates'
+                f'--no-check-certificates '
+                f'--force-overwrites '
+                f'--no-part'
             )
-
         else:
             download_cmd = (
                 f'{cmd} -R 25 --fragment-retries 25 '
-                f'-N 32 '
+                f'-N 64 '
                 f'--downloader aria2c '
                 f'--downloader-args "aria2c: '
-                f'-x 16 -j 32 -s 16 -k 1M '
+                f'-x 16 -j 64 -s 16 -k 1M '
                 f'--file-allocation=none" '
-                f'--buffer-size 512K '
-                f'--force-ipv4 '
-                f'--no-check-certificates'
+                f'--buffer-size 128K '
+                f'--no-check-certificates '
+                f'--force-overwrites '
+                f'--no-part'
             )
 
         print(download_cmd)
         logging.info(download_cmd)
+        k = subprocess.run(download_cmd, shell=True)
 
-        process = subprocess.run(
-            download_cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        if process.returncode == 0:
+        if k.returncode == 0:
             break
 
         retry_count += 1
         print(f"⚠️ Attempt {retry_count}/{max_retries} failed...")
-        logging.error(process.stderr.decode())
-
-        # ⏳ Exponential backoff
-        await asyncio.sleep(3 * retry_count)
+        
+        # 🔥 Also clean after failure
+        for pattern in patterns:
+            for f in glob.glob(pattern):
+                try:
+                    os.remove(f)
+                except:
+                    pass
+        
+        await asyncio.sleep(3)
 
     try:
         if os.path.isfile(name):
             return name
         elif os.path.isfile(f"{name}.webm"):
             return f"{name}.webm"
-
-        base = name.split(".")[0]
-
-        for ext in ["mkv", "mp4", "webm", "mp4.webm"]:
-            if os.path.isfile(f"{base}.{ext}"):
-                return f"{base}.{ext}"
-
-        return base + ".mp4"
-
+        name = name.split(".")[0]
+        if os.path.isfile(f"{name}.mkv"):
+            return f"{name}.mkv"
+        elif os.path.isfile(f"{name}.mp4"):
+            return f"{name}.mp4"
+        elif os.path.isfile(f"{name}.mp4.webm"):
+            return f"{name}.mp4.webm"
+        return name + ".mp4"
     except Exception as exc:
         logging.error(f"Error checking file: {exc}")
         return name
-
+        
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, channel_id, watermark="𝐈𝐓'𝐬𝐆𝐎𝐋𝐔", topic_thread_id: int = None):
     try:
         temp_thumb = None
