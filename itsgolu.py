@@ -1,4 +1,5 @@
 import os
+import glob
 import re
 import time
 import mmap
@@ -410,20 +411,31 @@ async def fast_download(url, name):
 
 
 # ✅ FAST download_video with -N 64
+
+
 async def download_video(url, cmd, name):
     retry_count = 0
     max_retries = 3
 
     while retry_count < max_retries:
+
+        # 🧹 Remove old fragment files
+        for f in glob.glob("*.part*"):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+
         if "m3u8" in url:
             download_cmd = (
                 f'{cmd} '
                 f'-R 50 --fragment-retries 50 '
                 f'--socket-timeout 120 '
-                f'--concurrent-fragments 16 '
+                f'--concurrent-fragments 12 '
                 f'-N 32 '
-                f'--buffer-size 512K '
+                f'--buffer-size 1M '
                 f'--http-chunk-size 10M '
+                f'--force-ipv4 '
                 f'--no-check-certificates'
             )
 
@@ -438,50 +450,62 @@ async def download_video(url, cmd, name):
                 f'-x 16 -j 32 -s 16 -k 1M '
                 f'--file-allocation=none '
                 f'--async-dns=true" '
-                f'--buffer-size 512K '
+                f'--buffer-size 1M '
                 f'--http-chunk-size 10M '
+                f'--force-ipv4 '
                 f'--no-check-certificates'
-        )
+            )
+
         else:
             download_cmd = (
                 f'{cmd} -R 25 --fragment-retries 25 '
-                f'-N 64 '
+                f'-N 32 '
                 f'--downloader aria2c '
                 f'--downloader-args "aria2c: '
-                f'-x 16 -j 64 -s 16 -k 1M '
+                f'-x 16 -j 32 -s 16 -k 1M '
                 f'--file-allocation=none" '
-                f'--buffer-size 128K '
+                f'--buffer-size 512K '
+                f'--force-ipv4 '
                 f'--no-check-certificates'
             )
 
         print(download_cmd)
         logging.info(download_cmd)
-        k = subprocess.run(download_cmd, shell=True)
 
-        if k.returncode == 0:
+        process = subprocess.run(
+            download_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        if process.returncode == 0:
             break
 
         retry_count += 1
         print(f"⚠️ Attempt {retry_count}/{max_retries} failed...")
-        await asyncio.sleep(3)
+        logging.error(process.stderr.decode())
+
+        # ⏳ Exponential backoff
+        await asyncio.sleep(3 * retry_count)
 
     try:
         if os.path.isfile(name):
             return name
         elif os.path.isfile(f"{name}.webm"):
             return f"{name}.webm"
-        name = name.split(".")[0]
-        if os.path.isfile(f"{name}.mkv"):
-            return f"{name}.mkv"
-        elif os.path.isfile(f"{name}.mp4"):
-            return f"{name}.mp4"
-        elif os.path.isfile(f"{name}.mp4.webm"):
-            return f"{name}.mp4.webm"
-        return name + ".mp4"
+
+        base = name.split(".")[0]
+
+        for ext in ["mkv", "mp4", "webm", "mp4.webm"]:
+            if os.path.isfile(f"{base}.{ext}"):
+                return f"{base}.{ext}"
+
+        return base + ".mp4"
+
     except Exception as exc:
         logging.error(f"Error checking file: {exc}")
         return name
-
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, channel_id, watermark="𝐈𝐓'𝐬𝐆𝐎𝐋𝐔", topic_thread_id: int = None):
     try:
