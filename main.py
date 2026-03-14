@@ -822,7 +822,7 @@ async def txt_handler(bot: Client, m: Message):
                 
                 # URL format: {Base}/hls/{quality}/main.m3u8*KID:KEY
                 m3u8_url = raw_url.split("*", 1)[0]    # {Base}/hls/{quality}/main.m3u8
-                key_part = raw_url.split("*", 1)[1]     # KID:KEY
+                keys_string = raw_url.split("*", 1)[1]     # KID:KEY
                 
                 # Check m3u8 encrypted hai ya nahi
                 is_encrypted = False
@@ -852,8 +852,7 @@ async def txt_handler(bot: Client, m: Message):
                     base_url = m3u8_url.split("/hls/")[0]
                     url = base_url + "/master.mpd"
                     
-                    keys_list = key_part.split(",")
-                    keys_string = " ".join([f"--key {k.strip()}" for k in keys_list])
+                    
                     mpd = url
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
