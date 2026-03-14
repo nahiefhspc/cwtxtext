@@ -915,7 +915,7 @@ async def txt_handler(bot: Client, m: Message):
                                 segment_accessible = False
                                 print(f"⚠️ Check failed + keys present → DRM mode")
                             else:
-                    segment_accessible = True
+                                segment_accessible = True
                                 print(f"⚠️ Check failed, no keys → trying normal")
             
                         if segment_accessible:
