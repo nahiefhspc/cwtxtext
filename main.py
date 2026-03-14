@@ -774,7 +774,6 @@ async def txt_handler(bot: Client, m: Message):
                     print(f"❌ Error connecting to API: {e}")
                     continue
 
-
             elif "rupkama.vercel.app" in url:
                 max_retries = 3
                 api_success = False
@@ -825,38 +824,78 @@ async def txt_handler(bot: Client, m: Message):
                 m3u8_url = raw_url.split("*", 1)[0]
                 keys_string = raw_url.split("*", 1)[1] if "*" in raw_url else ""
     
-                # ===== yt-dlp se hi test karo - exactly wahi tool jo download karega =====
+                # ===== SMART DRM DETECTION - Fragment level check =====
                 is_drm = False
                 try:
-                    print(f"🔍 Testing with yt-dlp (same tool that downloads)...")
-                    test_cmd = f'yt-dlp --test "{m3u8_url}" --no-warnings --socket-timeout 15'
-                    print(f"🧪 Running: {test_cmd}")
+                    print(f"🔍 Testing actual video fragments...")
         
-                    test_result = subprocess.run(
-                        test_cmd, shell=True, 
-                        capture_output=True, text=True, 
-                        timeout=30
-                    )
+                    hdrs = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
         
-                    test_output = test_result.stdout + test_result.stderr
-                    print(f"📊 yt-dlp test exit code: {test_result.returncode}")
+                    # Step 1: Download m3u8 manifest
+                    m3u8_resp = requests.get(m3u8_url, headers=hdrs, timeout=15)
+                    print(f"📄 Manifest status: {m3u8_resp.status_code}")
         
-                    if test_result.returncode != 0 and ("401" in test_output or "403" in test_output or "Unauthorized" in test_output or "Forbidden" in test_output):
+                    if m3u8_resp.status_code != 200:
                         is_drm = True
-                        print(f"🔐 yt-dlp got 401/403 → MPD + Keys mode")
-                    elif test_result.returncode != 0 and "unable to download" in test_output.lower():
-                        is_drm = True
-                        print(f"🔐 yt-dlp download failed → MPD + Keys mode")
+                        print(f"🔐 Manifest returned {m3u8_resp.status_code} → DRM mode")
                     else:
-                        is_drm = False
-                        print(f"✅ yt-dlp test passed → Normal M3U8 download")
+                        m3u8_text = m3u8_resp.text
             
-                except subprocess.TimeoutExpired:
-                    print(f"⏰ yt-dlp test timeout → trying MPD mode")
-                    is_drm = True
+                        # Step 2: Extract first fragment URL
+                        fragment_url = None
+                        base_path = m3u8_url.rsplit("/", 1)[0] + "/"
+            
+                        for line in m3u8_text.splitlines():
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                if line.startswith("http"):
+                                    fragment_url = line
+                                else:
+                                    fragment_url = base_path + line
+                                break
+            
+                        if fragment_url:
+                            print(f"🧪 Testing fragment: {fragment_url[:80]}...")
+                
+                            # Step 3: Try downloading first fragment
+                            frag_resp = requests.get(
+                                fragment_url, headers=hdrs, 
+                                timeout=15, stream=True
+                            )
+                
+                            print(f"📊 Fragment status: {frag_resp.status_code}")
+                
+                            if frag_resp.status_code in [401, 403]:
+                                is_drm = True
+                                print(f"🔐 Fragment {frag_resp.status_code} → DRM confirmed!")
+                            elif frag_resp.status_code == 200:
+                                chunk = next(frag_resp.iter_content(512), b"")
+                                if len(chunk) > 100:
+                                    is_drm = False
+                                    print(f"✅ Fragment OK ({len(chunk)} bytes) → Normal M3U8")
+                                else:
+                                    is_drm = True
+                                    print(f"🔐 Fragment too small → DRM mode")
+                            else:
+                                is_drm = True
+                                print(f"🔐 Fragment error {frag_resp.status_code} → DRM mode")
+                    
+                            frag_resp.close()
+                        else:
+                            # No fragment found in m3u8
+                            if keys_string:
+                                is_drm = True
+                                print(f"🔐 Keys provided → DRM mode")
+                            else:
+                                is_drm = False
+                                print(f"⚠️ No fragments, trying normal")
+                    
                 except Exception as e:
-                    print(f"⚠️ yt-dlp test error: {e} → trying MPD mode")
-                    is_drm = True
+                    print(f"⚠️ Fragment test error: {e}")
+                    is_drm = True if keys_string else False
+                    print(f"{'🔐 DRM mode (keys available)' if is_drm else '⚠️ Trying normal mode'}")
     
                 if is_drm and keys_string:
                     # MPD + Keys mode
@@ -866,18 +905,19 @@ async def txt_handler(bot: Client, m: Message):
                     mpd = url
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
-                elif is_drm and not keys_string:
-                    # DRM hai but keys nahi - skip
+                elif is_drm and not key_part:
                     print(f"❌ DRM detected but no keys available")
                     count += 1
                     failed_count += 1
                     continue
                 else:
-                    # Normal m3u8 download
                     url = m3u8_url
                     keys_string = ""
                     mpd = ""
                     print(f"✅ Normal M3U8: {url}")
+
+
+
 
 
                                 
