@@ -774,7 +774,7 @@ async def txt_handler(bot: Client, m: Message):
                     print(f"❌ Error connecting to API: {e}")
                     continue
 
-            elif "rupkama.vercel.app" in url:
+            elif "deltaoo.vercel.app" in url:
                 max_retries = 3
                 api_success = False
                 raw_url = None
@@ -829,12 +829,24 @@ async def txt_handler(bot: Client, m: Message):
                 try:
                     print(f"🔍 Checking M3U8: {m3u8_url}")
                     m3u8_response = requests.get(m3u8_url, timeout=30)
-                    m3u8_lower = m3u8_response.text.lower()
+                    status_code = m3u8_response.status_code
+                    m3u8_text = m3u8_response.text
+                    m3u8_lower = m3u8_text.lower()
                     
-                    # CENC = DRM encrypted → MPD + Keys needed
-                    # AES-128 = Normal → ffmpeg handles automatically
+                    print(f"📊 Status: {status_code} | Length: {len(m3u8_text)} chars")
                     
-                    drm_tags = [
+                    # CASE 1: HTTP error (400, 403, 401, etc) → Protected → DRM
+                    if status_code != 200:
+                        is_drm = True
+                        print(f"🔐 HTTP {status_code} → Stream protected → DRM mode")
+                    
+                    # CASE 2: Response has error message instead of m3u8 content
+                    elif not m3u8_text.strip().startswith("#EXTM3U"):
+                        is_drm = True
+                        print(f"🔐 Not valid M3U8 content → DRM mode")
+                    
+                    # CASE 3: CENC/DRM tags found
+                    elif any(tag in m3u8_lower for tag in [
                         "cenc",
                         "method=sample-aes",
                         "method=sample-aes-ctr",
@@ -842,24 +854,25 @@ async def txt_handler(bot: Client, m: Message):
                         "skd://",
                         "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",
                         "urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95",
-                    ]
-                    
-                    if any(tag in m3u8_lower for tag in drm_tags):
+                    ]):
                         is_drm = True
-                        print(f"🔐 DRM (CENC) detected → MPD + Keys mode")
+                        print(f"🔐 DRM tags detected → DRM mode")
+                    
+                    # CASE 4: AES-128 → ffmpeg handles automatically
                     elif "method=aes-128" in m3u8_lower:
                         is_drm = False
-                        print(f"✅ AES-128 detected → ffmpeg handles automatically")
+                        print(f"✅ AES-128 → ffmpeg handles automatically")
+                    
+                    # CASE 5: No encryption at all
                     else:
                         is_drm = False
                         print(f"✅ No encryption → Normal download")
                         
                 except Exception as e:
                     print(f"⚠️ M3U8 check failed: {e}")
-                    # Fallback: check if key_part exists
                     if key_part:
                         is_drm = True
-                        print(f"⚠️ Assuming DRM because keys provided")
+                        print(f"⚠️ Request failed + keys exist → DRM mode")
                     else:
                         is_drm = False
                 
@@ -867,12 +880,13 @@ async def txt_handler(bot: Client, m: Message):
                     # MPD + Keys mode
                     base_url = m3u8_url.split("/hls/")[0]
                     url = base_url + "/master.mpd"
-                                
+                    
+                    
                     mpd = url
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
                 else:
-                    # Normal m3u8 download — AES-128 ffmpeg handles
+                    # Normal m3u8 download
                     url = m3u8_url
                     keys_string = ""
                     mpd = ""
