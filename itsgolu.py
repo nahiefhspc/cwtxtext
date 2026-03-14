@@ -417,88 +417,92 @@ async def download_video(url, cmd, name):
     max_retries = 3
 
     while retry_count < max_retries:
-        # 🔥 Clean ALL partial/temp files before each attempt
+        # Clean partial files before each attempt
         base_name = name.split(".")[0]
-        patterns = [
-            f"{name}.part*",
-            f"{name}.temp*", 
-            f"{name}.ytdl",
-            f"{base_name}*.part*",
-            f"{base_name}*.temp*",
-            f"{base_name}*.ytdl",
-        ]
-        for pattern in patterns:
-            for f in glob.glob(pattern):
-                try:
-                    os.remove(f)
-                    print(f"🗑️ Removed: {f}")
-                except:
-                    pass
+        for f in glob.glob(f"{base_name}*part*") + glob.glob(f"{base_name}*.ytdl"):
+            try:
+                os.remove(f)
+            except:
+                pass
 
         if "m3u8" in url:
             download_cmd = (
                 f'{cmd} '
                 f'-R 50 --fragment-retries 50 '
-                f'--socket-timeout 120 '
-                f'--concurrent-fragments 16 '
-                f'-N 32 '
-                f'--buffer-size 512K '
-                f'--http-chunk-size 10M '
+                f'--socket-timeout 60 '
+                f'--concurrent-fragments 8 '
+                f'-N 16 '
+                f'--buffer-size 256K '
                 f'--no-check-certificates '
                 f'--force-overwrites '
-                f'--no-part'
+                f'--no-cache-dir '
+                f'--hls-prefer-native '
+                f'--postprocessor-args "ffmpeg:-threads 4"'
             )
+            # NOTE: Removed --no-part (causes instant failure on AES-128 HLS)
+            # NOTE: Removed --http-chunk-size (incompatible with HLS fragments)
+            # NOTE: Added --hls-prefer-native for better AES-128 handling
 
         elif "mpd" in url:
             download_cmd = (
                 f'{cmd} '
                 f'-R 50 --fragment-retries 50 '
-                f'--socket-timeout 120 '
-                f'-N 64 '
+                f'--socket-timeout 60 '
+                f'-N 16 '
                 f'--downloader aria2c '
                 f'--downloader-args "aria2c: '
-                f'-x 16 -j 32 -s 16 -k 1M '
+                f'-x 16 -j 16 -s 16 -k 1M '
                 f'--file-allocation=none '
-                f'--async-dns=true" '
-                f'--buffer-size 512K '
-                f'--http-chunk-size 10M '
+                f'--async-dns=true '
+                f'--max-connection-per-server=16" '
+                f'--buffer-size 256K '
                 f'--no-check-certificates '
                 f'--force-overwrites '
-                f'--no-part'
+                f'--no-part '
+                f'--no-cache-dir'
             )
         else:
             download_cmd = (
                 f'{cmd} -R 25 --fragment-retries 25 '
-                f'-N 64 '
+                f'-N 16 '
                 f'--downloader aria2c '
                 f'--downloader-args "aria2c: '
-                f'-x 16 -j 64 -s 16 -k 1M '
+                f'-x 16 -j 16 -s 16 -k 1M '
                 f'--file-allocation=none" '
-                f'--buffer-size 128K '
+                f'--buffer-size 256K '
                 f'--no-check-certificates '
                 f'--force-overwrites '
-                f'--no-part'
+                f'--no-part '
+                f'--no-cache-dir'
             )
 
         print(download_cmd)
         logging.info(download_cmd)
-        k = subprocess.run(download_cmd, shell=True)
+        
+        # Capture stderr to see actual error
+        k = subprocess.run(
+            download_cmd, 
+            shell=True, 
+            stderr=subprocess.PIPE, 
+            text=True
+        )
 
         if k.returncode == 0:
             break
 
         retry_count += 1
+        error_msg = k.stderr[-500:] if k.stderr else "No stderr captured"
         print(f"⚠️ Attempt {retry_count}/{max_retries} failed...")
+        print(f"📋 Error: {error_msg}")
+        logging.error(f"Attempt {retry_count} error: {error_msg}")
         
-        # 🔥 Also clean after failure
-        for pattern in patterns:
-            for f in glob.glob(pattern):
-                try:
-                    os.remove(f)
-                except:
-                    pass
+        for f in glob.glob(f"{base_name}*part*") + glob.glob(f"{base_name}*.ytdl"):
+            try:
+                os.remove(f)
+            except:
+                pass
         
-        await asyncio.sleep(3)
+        await asyncio.sleep(3 * retry_count)  # Increasing backoff
 
     try:
         if os.path.isfile(name):
