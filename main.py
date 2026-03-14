@@ -774,19 +774,93 @@ async def txt_handler(bot: Client, m: Message):
                     print(f"❌ Error connecting to API: {e}")
                     continue
 
-            elif "deltaoo.vercel.app" in url:
-                try:
-                    response = requests.get(url, timeout=40)
-                    data = response.json()
-                    if data.get("url"):
-                        url = data["url"]
-                    else:
-                        print(f"❌ Link Failed: {url}")
-                        print(f"⚠️ API Response: {data}")
-                        continue
-                except Exception as e:
-                    print(f"❌ Error connecting to Deltaoo API: {e}")
+            elif "rupkama.vercel.app" in url:
+                max_retries = 3
+                api_success = False
+                raw_url = None
+                
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        print(f"🔄 Deltaoo API Attempt {attempt}/{max_retries}...")
+                        response = requests.get(url, timeout=60)
+                        data = response.json()
+                        
+                        if data.get("url"):
+                            raw_url = data["url"]
+                            api_success = True
+                            print(f"✅ Deltaoo API Success on Attempt {attempt}")
+                            break
+                        else:
+                            print(f"⚠️ Attempt {attempt} - No URL in response: {data}")
+                            if attempt < max_retries:
+                                print(f"⏳ Waiting 5 seconds before retry...")
+                                time.sleep(5)
+                                
+                    except requests.exceptions.Timeout:
+                        print(f"⏰ Attempt {attempt} - Timeout (60s exceeded)")
+                        if attempt < max_retries:
+                            print(f"⏳ Waiting 5 seconds before retry...")
+                            time.sleep(5)
+                            
+                    except requests.exceptions.ConnectionError:
+                        print(f"🌐 Attempt {attempt} - Connection Error")
+                        if attempt < max_retries:
+                            print(f"⏳ Waiting 10 seconds before retry...")
+                            time.sleep(10)
+                            
+                    except Exception as e:
+                        print(f"❌ Attempt {attempt} - Error: {e}")
+                        if attempt < max_retries:
+                            print(f"⏳ Waiting 5 seconds before retry...")
+                            time.sleep(5)
+                
+                if not api_success or not raw_url:
+                    print(f"❌ Deltaoo API Failed after {max_retries} attempts: {url}")
+                    count += 1
+                    failed_count += 1
                     continue
+                
+                # URL format: {Base}/hls/{quality}/main.m3u8*KID:KEY
+                m3u8_url = raw_url.split("*", 1)[0]    # {Base}/hls/{quality}/main.m3u8
+                key_part = raw_url.split("*", 1)[1]     # KID:KEY
+                
+                # Check m3u8 encrypted hai ya nahi
+                is_encrypted = False
+                try:
+                    print(f"🔍 Checking M3U8: {m3u8_url}")
+                    m3u8_response = requests.get(m3u8_url, timeout=30)
+                    m3u8_content = m3u8_response.text.lower()
+                    
+                    encryption_tags = [
+                        "#ext-x-key", "method=aes", "method=sample-aes",
+                        "widevine", "clearkey", "cenc", "encrypted",
+                        "uri=\"data:text/plain", "skd://", "method=sample-aes-ctr"
+                    ]
+                    
+                    if any(tag in m3u8_content for tag in encryption_tags):
+                        is_encrypted = True
+                        print(f"🔐 ENCRYPTED hai → MPD+DRM use karega")
+                    else:
+                        print(f"✅ NOT encrypted → Normal m3u8 download")
+                        
+                except Exception as e:
+                    print(f"⚠️ M3U8 check failed, assuming encrypted: {e}")
+                    is_encrypted = True
+                
+                if is_encrypted:
+                    # {Base}/hls/{quality}/main.m3u8 → {Base}/master.mpd*KID:KEY
+                    base_url = m3u8_url.split("/hls/")[0]
+                    url = base_url + "/master.mpd"
+                    
+                    keys_list = key_part.split(",")
+                    keys_string = " ".join([f"--key {k.strip()}" for k in keys_list])
+                    mpd = url
+                    print(f"🔐 MPD URL: {url}")
+                    print(f"🔑 Keys: {keys_string}")
+                else:
+                    # Normal m3u8 download
+                    url = m3u8_url
+                    print(f"✅ Normal M3U8: {url}")
 
             elif "https://static-db.classx.co.in/" in url:
                 if "*" in url:
