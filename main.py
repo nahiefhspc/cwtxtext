@@ -774,17 +774,17 @@ async def txt_handler(bot: Client, m: Message):
                     print(f"❌ Error connecting to API: {e}")
                     continue
 
-            elif "rupkama.vercel.app" in url:
+            elif "rurkama.vercel.app" in url:
                 max_retries = 3
                 api_success = False
                 raw_url = None
-                
+    
                 for attempt in range(1, max_retries + 1):
                     try:
                         print(f"🔄 Deltaoo API Attempt {attempt}/{max_retries}...")
                         response = requests.get(url, timeout=60)
                         data = response.json()
-                        
+            
                         if data.get("url"):
                             raw_url = data["url"]
                             api_success = True
@@ -795,7 +795,7 @@ async def txt_handler(bot: Client, m: Message):
                             if attempt < max_retries:
                                 print(f"⏳ Waiting 5 seconds before retry...")
                                 time.sleep(5)
-                                
+                    
                     except requests.exceptions.Timeout:
                         print(f"⏰ Attempt {attempt} - Timeout (60s exceeded)")
                         if attempt < max_retries:
@@ -807,23 +807,23 @@ async def txt_handler(bot: Client, m: Message):
                         if attempt < max_retries:
                             print(f"⏳ Waiting 10 seconds before retry...")
                             time.sleep(10)
-                            
+                
                     except Exception as e:
                         print(f"❌ Attempt {attempt} - Error: {e}")
                         if attempt < max_retries:
                             print(f"⏳ Waiting 5 seconds before retry...")
                             time.sleep(5)
-                
+    
                 if not api_success or not raw_url:
                     print(f"❌ Deltaoo API Failed after {max_retries} attempts: {url}")
                     count += 1
                     failed_count += 1
                     continue
-                
+    
                 # URL format: {Base}/hls/{quality}/main.m3u8*KID:KEY
                 m3u8_url = raw_url.split("*", 1)[0]
                 keys_string = raw_url.split("*", 1)[1] if "*" in raw_url else ""
-                
+    
                 # Check DRM or Normal
                 is_drm = False
                 try:
@@ -832,20 +832,17 @@ async def txt_handler(bot: Client, m: Message):
                     status_code = m3u8_response.status_code
                     m3u8_text = m3u8_response.text
                     m3u8_lower = m3u8_text.lower()
-                    
+        
                     print(f"📊 Status: {status_code} | Length: {len(m3u8_text)} chars")
-                    
-                    # CASE 1: HTTP error (400, 403, 401, etc) → Protected → DRM
+        
                     if status_code != 200:
                         is_drm = True
                         print(f"🔐 HTTP {status_code} → Stream protected → DRM mode")
-                    
-                    # CASE 2: Response has error message instead of m3u8 content
+        
                     elif not m3u8_text.strip().startswith("#EXTM3U"):
                         is_drm = True
                         print(f"🔐 Not valid M3U8 content → DRM mode")
-                    
-                    # CASE 3: CENC/DRM tags found
+        
                     elif any(tag in m3u8_lower for tag in [
                         "cenc",
                         "method=sample-aes",
@@ -857,17 +854,81 @@ async def txt_handler(bot: Client, m: Message):
                     ]):
                         is_drm = True
                         print(f"🔐 DRM tags detected → DRM mode")
-                    
-                    # CASE 4: AES-128 → ffmpeg handles automatically
+        
+                    # ===== UPDATED AES-128 CHECK =====
                     elif "method=aes-128" in m3u8_lower:
-                        is_drm = False
-                        print(f"✅ AES-128 → ffmpeg handles automatically")
+                        # AES-128 hai, but segments accessible hain ya nahi check karo
+                        print(f"🔍 AES-128 detected → Checking if segments are accessible...")
+            
+                        segment_accessible = False
+                        try:
+                            # M3U8 se pehla segment URL nikalo
+                            import re
+                            lines = m3u8_text.strip().split('\n')
+                            segment_url = None
+                
+                            for line in lines:
+                                line = line.strip()
+                                if line and not line.startswith('#'):
+                                    segment_url = line
+                                    break
+                
+                            if segment_url:
+                                # Relative URL ko absolute banao
+                                if not segment_url.startswith('http'):
+                                    base = m3u8_url.rsplit('/', 1)[0]
+                                    segment_url = base + '/' + segment_url
                     
-                    # CASE 5: No encryption at all
+                                print(f"🔍 Testing segment: {segment_url[:80]}...")
+                                seg_response = requests.head(segment_url, timeout=15, allow_redirects=True)
+                                print(f"📊 Segment Status: {seg_response.status_code}")
+                    
+                                if seg_response.status_code in [200, 206]:
+                                    segment_accessible = True
+                                    print(f"✅ Segments accessible → Normal download")
+                                elif seg_response.status_code in [401, 403]:
+                                    segment_accessible = False
+                                    print(f"🔐 Segments blocked ({seg_response.status_code}) → DRM mode")
+                                else:
+                                    # GET se bhi try karo (kuch servers HEAD support nahi karte)
+                                    seg_response2 = requests.get(segment_url, timeout=15, stream=True, allow_redirects=True)
+                                    print(f"📊 Segment GET Status: {seg_response2.status_code}")
+                                    if seg_response2.status_code in [200, 206]:
+                                        segment_accessible = True
+                                        print(f"✅ Segments accessible (GET) → Normal download")
+                                    else:
+                                        segment_accessible = False
+                                        print(f"🔐 Segments not accessible ({seg_response2.status_code}) → DRM mode")
+                                    seg_response2.close()
+                            else:
+                                print(f"⚠️ No segment found in M3U8 → Checking key URI...")
+                                # Agar segment nahi mila, key URI check karo
+                                if keys_string:
+                                    segment_accessible = False
+                                else:
+                                    segment_accessible = True
+                        
+                        except Exception as seg_err:
+                            print(f"⚠️ Segment check failed: {seg_err}")
+                            # Agar check fail ho aur keys hain toh DRM assume karo
+                            if keys_string:
+                                segment_accessible = False
+                                print(f"⚠️ Check failed + keys present → DRM mode")
+                            else:
+                    segment_accessible = True
+                                print(f"⚠️ Check failed, no keys → trying normal")
+            
+                        if segment_accessible:
+                            is_drm = False
+                            print(f"✅ AES-128 + Segments OK → ffmpeg handles automatically")
+                        else:
+                            is_drm = True
+                            print(f"🔐 AES-128 + Segments BLOCKED → Switching to DRM/MPD mode")
+        
                     else:
                         is_drm = False
                         print(f"✅ No encryption → Normal download")
-                        
+            
                 except Exception as e:
                     print(f"⚠️ M3U8 check failed: {e}")
                     if key_part:
@@ -875,13 +936,12 @@ async def txt_handler(bot: Client, m: Message):
                         print(f"⚠️ Request failed + keys exist → DRM mode")
                     else:
                         is_drm = False
-                
+    
                 if is_drm:
                     # MPD + Keys mode
                     base_url = m3u8_url.split("/hls/")[0]
                     url = base_url + "/master.mpd"
-                    
-                    
+                       
                     mpd = url
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
