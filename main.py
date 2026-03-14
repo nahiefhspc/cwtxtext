@@ -821,46 +821,62 @@ async def txt_handler(bot: Client, m: Message):
                     continue
                 
                 # URL format: {Base}/hls/{quality}/main.m3u8*KID:KEY
-                m3u8_url = raw_url.split("*", 1)[0]    # {Base}/hls/{quality}/main.m3u8
-                keys_string = raw_url.split("*", 1)[1]     # KID:KEY
+                m3u8_url = raw_url.split("*", 1)[0]
+                keys_string = raw_url.split("*", 1)[1] if "*" in raw_url else ""
                 
-                # Check m3u8 encrypted hai ya nahi
-                is_encrypted = False
+                # Check DRM or Normal
+                is_drm = False
                 try:
                     print(f"🔍 Checking M3U8: {m3u8_url}")
                     m3u8_response = requests.get(m3u8_url, timeout=30)
-                    m3u8_content = m3u8_response.text.lower()
+                    m3u8_lower = m3u8_response.text.lower()
                     
-                    encryption_tags = [
-                        "#ext-x-key", "method=aes", "method=sample-aes",
-                        "widevine", "clearkey", "cenc", "encrypted",
-                        "uri=\"data:text/plain", "skd://", "method=sample-aes-ctr"
+                    # CENC = DRM encrypted → MPD + Keys needed
+                    # AES-128 = Normal → ffmpeg handles automatically
+                    
+                    drm_tags = [
+                        "cenc",
+                        "method=sample-aes",
+                        "method=sample-aes-ctr",
+                        "widevine",
+                        "skd://",
+                        "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",
+                        "urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95",
                     ]
                     
-                    if any(tag in m3u8_content for tag in encryption_tags):
-                        is_encrypted = True
-                        print(f"🔐 ENCRYPTED hai → MPD+DRM use karega")
+                    if any(tag in m3u8_lower for tag in drm_tags):
+                        is_drm = True
+                        print(f"🔐 DRM (CENC) detected → MPD + Keys mode")
+                    elif "method=aes-128" in m3u8_lower:
+                        is_drm = False
+                        print(f"✅ AES-128 detected → ffmpeg handles automatically")
                     else:
-                        print(f"✅ NOT encrypted → Normal m3u8 download")
+                        is_drm = False
+                        print(f"✅ No encryption → Normal download")
                         
                 except Exception as e:
-                    print(f"⚠️ M3U8 check failed, assuming encrypted: {e}")
-                    is_encrypted = True
+                    print(f"⚠️ M3U8 check failed: {e}")
+                    # Fallback: check if key_part exists
+                    if key_part:
+                        is_drm = True
+                        print(f"⚠️ Assuming DRM because keys provided")
+                    else:
+                        is_drm = False
                 
-                if is_encrypted:
-                    # {Base}/hls/{quality}/main.m3u8 → {Base}/master.mpd*KID:KEY
+                if is_drm:
+                    # MPD + Keys mode
                     base_url = m3u8_url.split("/hls/")[0]
                     url = base_url + "/master.mpd"
-                    
-                    
+                                
                     mpd = url
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
                 else:
-                    # Normal m3u8 download
+                    # Normal m3u8 download — AES-128 ffmpeg handles
                     url = m3u8_url
+                    keys_string = ""
+                    mpd = ""
                     print(f"✅ Normal M3U8: {url}")
-
             elif "https://static-db.classx.co.in/" in url:
                 if "*" in url:
                     base_url, key = url.split("*", 1)
