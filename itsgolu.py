@@ -415,19 +415,33 @@ async def download_video(url, cmd, name):
     max_retries = 3
 
     while retry_count < max_retries:
-        if "m3u8" in url or "mpd" in url:
+        if "m3u8" in url:
             download_cmd = (
-                f'{cmd} -R 50 --fragment-retries 50 '
+                f'{cmd} '
+                f'-R 50 --fragment-retries 50 '
                 f'--socket-timeout 120 '
+                f'--concurrent-fragments 16 '
                 f'-N 32 '
-                f'--downloader aria2c '
-                f'--downloader-args "aria2c: '
-                f'-x 16 -j 32 -s 16 -k 512K '
-                f'--file-allocation=none '
-                f'--async-dns=true" '
-                f'--buffer-size 256K '
+                f'--buffer-size 512K '
+                f'--http-chunk-size 10M '
                 f'--no-check-certificates'
             )
+
+        elif "mpd" in url:
+            download_cmd = (
+                f'{cmd} '
+                f'-R 50 --fragment-retries 50 '
+                f'--socket-timeout 120 '
+                f'-N 64 '
+                f'--downloader aria2c '
+                f'--downloader-args "aria2c: '
+                f'-x 16 -j 32 -s 16 -k 1M '
+                f'--file-allocation=none '
+                f'--async-dns=true" '
+                f'--buffer-size 512K '
+                f'--http-chunk-size 10M '
+                f'--no-check-certificates'
+        )
         else:
             download_cmd = (
                 f'{cmd} -R 25 --fragment-retries 25 '
