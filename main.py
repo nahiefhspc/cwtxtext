@@ -774,7 +774,7 @@ async def txt_handler(bot: Client, m: Message):
                     print(f"❌ Error connecting to API: {e}")
                     continue
 
-            elif "deltaoo.vercel.app" in url:
+            elif "rupkama.vercel.app" in url:
                 max_retries = 3
                 api_success = False
                 raw_url = None
