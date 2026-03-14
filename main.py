@@ -677,7 +677,7 @@ async def txt_handler(bot: Client, m: Message):
                 name1 = title.strip()
 
             cleaned_name1 = name1.replace("(", "[").replace(")", "]").replace("_", "").replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
-            name = f'[𝗖𝗵𝗶𝗪𝗸𝗶𝗠𝗞𝗖𝟮𝟰𝟳🤬]{cleaned_name1[:60]}'
+            name = f'[𝗛𝗔𝗖𝗞𝗛𝗘𝗜𝗦𝗧😈]{cleaned_name1[:60]}'
                  
             user_id = m.from_user.id
             
@@ -1021,15 +1021,15 @@ async def txt_handler(bot: Client, m: Message):
     
             try:
                 cc = (
-                    f"<b>ꕥ 𝗡𝗮𝗺𝗲 ➾ {cleaned_name1}</b>\n\n"
-                    f"<b>🎬 𝗤𝘂𝗮𝗹𝗶𝘁𝘆 ➾ {raw_text97}p</b>\n\n"                
-                    f"<b>📚 𝗦𝘂𝗯𝗷𝗲𝗰𝘁 ➾ {raw_text65}</b>\n\n"
-                    f"<b>🗃️ 𝗕𝗮𝘁𝗰𝗵 ➾ {b_name}</b>"
+                    f"<b>|🇮🇳| {cleaned_name1}</b>\n\n"
+                    f"<b>😎 ℚ𝕦𝕒𝕝𝕚𝕥𝕪 ➠ {raw_text97}p</b>\n\n"                
+                    f"<b>🧿 𝐁𝐀𝐓𝐂𝐇 ➤ {b_name}</b>\n\n"
+                    f"<b>ChapterId > {raw_text65}</b>"
                 )
                 cc1 = (
-                    f"<b>ꕥ 𝗡𝗮𝗺𝗲 ➾ {cleaned_name1}</b>\n\n"
-                    f"<b>📚 𝗦𝘂𝗯𝗷𝗲𝗰𝘁 ➾ {raw_text65}</b>\n\n"
-                    f"<b>🗃️ 𝗕𝗮𝘁𝗰𝗵 ➾ {b_name}</b>"
+                    f"<b>|🇮🇳| {cleaned_name1}</b>\n\n"
+                    f"<b>🧿 𝐁𝐀𝐓𝐂𝐇 ➤ {b_name}</b>\n\n"
+                    f"<b>ChapterId > {raw_text65}</b>"
                 )
                 cczip = f'[📁]Zip Id : {str(count).zfill(3)}\n**Zip Title :** `{name1} .zip`\n<blockquote><b>Batch Name :</b> {b_name}</blockquote>\n\n**Extracted by➤**{CR}\n' 
                 ccimg = (
