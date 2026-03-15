@@ -425,62 +425,25 @@ async def download_video(url, cmd, name):
             except:
                 pass
 
-        if "m3u8" in url:
+        if "m3u8" in url or "mpd" in url:
             download_cmd = (
-                f'{cmd} '
-                f'--retries 50 '
-                f'--fragment-retries 50 '
-                f'--retry-sleep 2 '
-                f'--retry-sleep fragment:2 '
-                f'--retry-sleep http:3 '
-                f'--socket-timeout 20 '
-                f'--concurrent-fragments 16 '
-                f'-N 16 '
-                f'--buffer-size 1M '
-                f'--http-chunk-size 10M '
-                f'--throttled-rate 100K '
-                f'--sleep-requests 0.3 '
-                f'--no-check-certificates '
-                f'--force-overwrites '
-                f'--no-cache-dir '
-                f'--hls-prefer-native '
-                f'--no-part '
-                f'--no-mtime '
-                f'--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                f'AppleWebKit/537.36 (KHTML, like Gecko) '
-                f'Chrome/131.0.0.0 Safari/537.36" '
-                f'--postprocessor-args "ffmpeg:-threads 4" '
+                f'{cmd} --no-continue --force-overwrites '
+                f'-R 25 --fragment-retries 25 '
+                f'-N 64 '
+                f'--downloader aria2c '
+                f'--downloader-args "aria2c: '
+                f'-x 16 -j 64 -s 16 -k 512K '
+                f'--file-allocation=none '
+                f'--async-dns=true" '
+                f'--no-hls-use-mpegts '
+                f'--buffer-size 128K '
+                f'--no-check-certificates'
             )
             # NOTE: Removed --no-part (causes instant failure on AES-128 HLS)
             # NOTE: Removed --http-chunk-size (incompatible with HLS fragments)
             # NOTE: Added --hls-prefer-native for better AES-128 handling
 
-        elif "mpd" in url:
-            download_cmd = (
-                f'{cmd} '
-                f'--retries 50 '
-                f'--fragment-retries 50 '
-                f'--retry-sleep 2 '
-                f'--retry-sleep fragment:2 '
-                f'--retry-sleep http:3 '
-                f'--socket-timeout 20 '
-                f'--concurrent-fragments 16 '
-                f'-N 16 '
-                f'--buffer-size 1M '
-                f'--http-chunk-size 10M '
-                f'--throttled-rate 100K '
-                f'--sleep-requests 0.3 '
-                f'--no-check-certificates '
-                f'--force-overwrites '
-                f'--no-cache-dir '
-                f'--hls-prefer-native '
-                f'--no-part '
-                f'--no-mtime '
-                f'--user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                f'AppleWebKit/537.36 (KHTML, like Gecko) '
-                f'Chrome/131.0.0.0 Safari/537.36" '
-                f'--postprocessor-args "ffmpeg:-threads 4" '
-            )
+        
         else:
             download_cmd = (
                 f'{cmd} -R 25 --fragment-retries 25 '
