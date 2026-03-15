@@ -820,105 +820,47 @@ async def txt_handler(bot: Client, m: Message):
                     failed_count += 1
                     continue
     
-                # URL format: {Base}/hls/{quality}/main.m3u8*KID:KEY
-                m3u8_url = raw_url.split("*", 1)[0]
-                keys_string = raw_url.split("*", 1)[1] if "*" in raw_url else ""
+                # Split URL and Keys
+                if "*" in raw_url:
+                    video_url = raw_url.split("*", 1)[0]
+                    keys_string = raw_url.split("*", 1)[1]                 
+                else:
+                    video_url = raw_url
+                    keys_string = ""
     
-                # ===== SMART DRM DETECTION - Fragment level check =====
-                is_drm = False
-                try:
-                    print(f"🔍 Testing actual video fragments...")
-        
-                    hdrs = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-        
-                    # Step 1: Download m3u8 manifest
-                    m3u8_resp = requests.get(m3u8_url, headers=hdrs, timeout=15)
-                    print(f"📄 Manifest status: {m3u8_resp.status_code}")
-        
-                    if m3u8_resp.status_code != 200:
-                        is_drm = True
-                        print(f"🔐 Manifest returned {m3u8_resp.status_code} → DRM mode")
-                    else:
-                        m3u8_text = m3u8_resp.text
-            
-                        # Step 2: Extract first fragment URL
-                        fragment_url = None
-                        base_path = m3u8_url.rsplit("/", 1)[0] + "/"
-            
-                        for line in m3u8_text.splitlines():
-                            line = line.strip()
-                            if line and not line.startswith("#"):
-                                if line.startswith("http"):
-                                    fragment_url = line
-                                else:
-                                    fragment_url = base_path + line
-                                break
-            
-                        if fragment_url:
-                            print(f"🧪 Testing fragment: {fragment_url[:80]}...")
-                
-                            # Step 3: Try downloading first fragment
-                            frag_resp = requests.get(
-                                fragment_url, headers=hdrs, 
-                                timeout=15, stream=True
-                            )
-                
-                            print(f"📊 Fragment status: {frag_resp.status_code}")
-                
-                            if frag_resp.status_code in [401, 403]:
-                                is_drm = True
-                                print(f"🔐 Fragment {frag_resp.status_code} → DRM confirmed!")
-                            elif frag_resp.status_code == 200:
-                                chunk = next(frag_resp.iter_content(512), b"")
-                                if len(chunk) > 100:
-                                    is_drm = False
-                                    print(f"✅ Fragment OK ({len(chunk)} bytes) → Normal M3U8")
-                                else:
-                                    is_drm = True
-                                    print(f"🔐 Fragment too small → DRM mode")
-                            else:
-                                is_drm = True
-                                print(f"🔐 Fragment error {frag_resp.status_code} → DRM mode")
-                    
-                            frag_resp.close()
-                        else:
-                            # No fragment found in m3u8
-                            if keys_string:
-                                is_drm = True
-                                print(f"🔐 Keys provided → DRM mode")
-                            else:
-                                is_drm = False
-                                print(f"⚠️ No fragments, trying normal")
-                    
-                except Exception as e:
-                    print(f"⚠️ Fragment test error: {e}")
-                    is_drm = True if keys_string else False
-                    print(f"{'🔐 DRM mode (keys available)' if is_drm else '⚠️ Trying normal mode'}")
-    
-                if is_drm and keys_string:
-                    # MPD + Keys mode
-                    base_url = m3u8_url.split("/hls/")[0]
-                    url = base_url + "/master.mpd"
-        
-                    mpd = url
+                # ===== Direct URL Based Detection =====
+                if "master.mpd" in video_url and keys_string:
+                    # MPD + Keys → DRM mode
+                    url = video_url
+                    mpd = video_url
+                    print(f"🔐 MPD Mode")
                     print(f"🔐 MPD URL: {url}")
                     print(f"🔑 Keys: {keys_string}")
-                elif is_drm and not key_part:
-                    print(f"❌ DRM detected but no keys available")
-                    count += 1
-                    failed_count += 1
-                    continue
-                else:
-                    url = m3u8_url
+        
+                elif "main.m3u8" in video_url or ".m3u8" in video_url:
+                    # M3U8 → Normal mode (keys ignore)
+                    url = video_url
                     keys_string = ""
                     mpd = ""
-                    print(f"✅ Normal M3U8: {url}")
+                    print(f"✅ M3U8 Mode: {url}")
+        
+                elif ".mpd" in video_url and keys_string:
+                    # Any other MPD + Keys
+                    url = video_url
+                    mpd = video_url
+                    print(f"🔐 MPD Mode")
+                    print(f"🔐 MPD URL: {url}")
+                    print(f"🔑 Keys: {keys_string}")
+        
+                else:
+                    # Fallback - direct download
+                    url = video_url
+                    keys_string = ""
+                    mpd = ""
+                    print(f"📥 Direct Mode: {url}")
 
 
-
-
+                        
 
                                 
             elif "https://static-db.classx.co.in/" in url:
