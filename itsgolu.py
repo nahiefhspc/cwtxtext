@@ -428,17 +428,54 @@ async def download_video(url, cmd, name):
         if "m3u8" in url or "mpd" in url:
             download_cmd = (
                 f'{cmd} --no-continue --force-overwrites '
-                f'-R 25 --fragment-retries 25 '
-                f'-N 64 '
+        
+                # ✅ Speed ke liye aggressive retries
+                f'--socket-timeout 60 '
+                f'--retries 25 '
+                f'--fragment-retries 25 '
+                f'--retry-sleep 2 '  # 2 sec wait (faster recovery)
+        
+                # ✅ Heroku sweet spot for speed
+                f'-N 16 '  # 16 concurrent (balance of speed & stability)
+        
+                # ✅ Aria2c - Speed optimized
                 f'--downloader aria2c '
                 f'--downloader-args "aria2c: '
-                f'-x 16 -j 64 -s 16 -k 512K '
+                f'-x 8 '      # 8 connections per file (optimal)
+                f'-j 24 '     # 24 concurrent (increased for speed)
+                f'-s 8 '      # 8 splits
+                f'-k 2M '     # ✅ 2MB chunk size (faster, fewer fragments)
+        
+                # ✅ Timeouts
+                f'--timeout=60 '
+                f'--connect-timeout=30 '
+                f'--max-tries=15 '
+                f'--retry-wait=2 '
+        
+                # ✅ Speed boosters
                 f'--file-allocation=none '
-                f'--async-dns=true" '
-                f'--no-hls-use-mpegts '
-                f'--buffer-size 128K '
-                f'--no-check-certificates'
+                f'--async-dns=true '
+                f'--enable-http-pipelining=true '  # ✅ MAJOR SPEED BOOST
+                f'--max-connection-per-server=8 '
+                f'--min-split-size=2M '  # Larger chunks = speed
+                f'--max-overall-download-limit=0 '
+                f'--split=8 '  # ✅ Force splitting
+        
+                f'" '
+        
+                # ✅ HLS/MPD specific
+                f'--hls-prefer-native '
+                f'--concurrent-fragments 16 '  # Match -N
+          
+                # ✅ Buffer & anti-throttle
+                f'--buffer-size 128K '  # ✅ Increased for speed
+                f'--throttled-rate 300K '  # ✅ Higher to avoid throttling
+        
+                f'--no-check-certificates '
+                f'--no-warnings'
             )
+
+        
             # NOTE: Removed --no-part (causes instant failure on AES-128 HLS)
             # NOTE: Removed --http-chunk-size (incompatible with HLS fragments)
             # NOTE: Added --hls-prefer-native for better AES-128 handling
