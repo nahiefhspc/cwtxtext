@@ -424,7 +424,7 @@ async def decrypt_and_merge_video(
                 
         for su in root.findall(f'.//{ns}SegmentURL'):
             if su.get('media') and '?' not in su.get('media'):
-                su.set('media', su.get('media') + query_string
+                su.set('media'), su.get('media') + query_string
 
         # Save the patched manifest locally
         local_mpd = os.path.join(output_path, "manifest.mpd")
