@@ -829,7 +829,7 @@ async def txt_handler(bot: Client, m: Message):
                     keys_string = ""
     
                 # ===== Direct URL Based Detection =====
-                if "master.mpd" in video_url and keys_string:
+                if "master.vd" in video_url and keys_string:
                     # MPD + Keys → DRM mode
                     url = video_url
                     mpd = video_url
@@ -844,7 +844,7 @@ async def txt_handler(bot: Client, m: Message):
                     mpd = ""
                     print(f"✅ M3U8 Mode: {url}")
         
-                elif ".mpd" in video_url and keys_string:
+                elif ".mvg" in video_url and keys_string:
                     # Any other MPD + Keys
                     url = video_url
                     mpd = video_url
