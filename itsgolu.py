@@ -408,24 +408,47 @@ async def decrypt_and_merge_video(
         mpd_text = resp.text
         parsed_mpd = urlparse(mpd_url)
         query_string = f"?{parsed_mpd.query}" if parsed_mpd.query else ""
+        base_mpd_path = f"{parsed_mpd.scheme}://{parsed_mpd.netloc}{parsed_mpd.path.rsplit('/', 1)[0]}/"
         
         # Parse XML and append query string to all segment URLs
         root = ET.fromstring(mpd_text)
         ns = root.tag.split('}')[0] + '}' if '}' in root.tag else ''
         
         for base in root.findall(f'.//{ns}BaseURL'):
-            if base.text and '?' not in base.text:
-                base.text += query_string
-                
+            if base.text:
+                # Make relative URL absolute
+                if not base.text.startswith('http'):
+                    base.text = base_mpd_path + base.text
+                # Add query params if not present
+                if '?' not in base.text:
+                    base.text += query_string
+                    
         for st in root.findall(f'.//{ns}SegmentTemplate'):
-            if st.get('media') and '?' not in st.get('media'):
-                st.set('media', st.get('media') + query_string)
-            if st.get('initialization') and '?' not in st.get('initialization'):
-                st.set('initialization', st.get('initialization') + query_string)
+            media = st.get('media')
+            init = st.get('initialization')
+            
+            if media:
+                if not media.startswith('http'):
+                    media = base_mpd_path + media
+                if '?' not in media:
+                    media += query_string
+                st.set('media', media)
+                
+            if init:
+                if not init.startswith('http'):
+                    init = base_mpd_path + init
+                if '?' not in init:
+                    init += query_string
+                st.set('initialization', init)
                 
         for su in root.findall(f'.//{ns}SegmentURL'):
-            if su.get('media') and '?' not in su.get('media'):
-                su.set('media'), su.get('media') + query_string
+            media = su.get('media')
+            if media:
+                if not media.startswith('http'):
+                    media = base_mpd_path + media
+                if '?' not in media:
+                    media += query_string
+                su.set('media', media)
 
         # Save the patched manifest locally
         local_mpd = os.path.join(output_path, "manifest.mpd")
@@ -437,6 +460,10 @@ async def decrypt_and_merge_video(
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # ✅ STEP 2: Download using patched local MPD
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ✅ FIX: Use file:// protocol for local file path
+        abs_mpd_path = os.path.abspath(local_mpd)
+        file_url = f"file://{abs_mpd_path}"
+        
         cmd1 = (
             f'yt-dlp -f "bv[height<={quality}]+ba/b" '
             f'-o "{output_path}/file.%(ext)s" '
@@ -448,7 +475,7 @@ async def decrypt_and_merge_video(
             f'--retries 10 '
             f'--fragment-retries 10 '
             f'--no-warnings '
-            f'"{local_mpd}"'  # 👈 Passing local file instead of URL
+            f'"{file_url}"'  # 👈 Passing file:// URL
         )
         print(f"🔽 Downloading MPD: {cmd1}")
         subprocess.run(cmd1, shell=True)
@@ -543,7 +570,6 @@ async def decrypt_and_merge_video(
     except Exception as e:
         print(f"❌ decrypt_and_merge error: {e}")
         raise
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ✅ FAST DOWNLOAD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
