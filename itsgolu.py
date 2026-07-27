@@ -9,6 +9,7 @@ import aiofiles
 import asyncio
 import logging
 import requests
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 import tgcrypto
 import subprocess
