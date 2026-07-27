@@ -345,6 +345,7 @@ def build_download_command(
     2. ✅ --hls-use-mpegts
     3. ✅ --concurrent-fragments 16
     4. ✅ --newline for clean output
+    5. ✅ HEADERS ADDED
     """
 
     base_cmd = (
@@ -356,6 +357,9 @@ def build_download_command(
         f'--fragment-retries 25 '
         f'--no-warnings '
         f'--newline '
+        # 👇 HEADERS ADDED HERE
+        f'--add-header "User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36" '
+        f'--add-header "Referer: https://rarestudy.in/" '
     )
 
     # ✅ Cookies
@@ -372,7 +376,6 @@ def build_download_command(
     base_cmd += f'-o "{output_name}" "{url}"'
     return base_cmd
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ✅ DECRYPT AND MERGE VIDEO
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -387,12 +390,14 @@ async def decrypt_and_merge_video(
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # ✅ FIXED: aria2c no space
+        # ✅ HEADERS ADDED HERE
         cmd1 = (
             f'yt-dlp -f "bv[height<={quality}]+ba/b" '
             f'-o "{output_path}/file.%(ext)s" '
             f'--allow-unplayable-format '
             f'--no-check-certificate '
+            f'--add-header "User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36" '
+            f'--add-header "Referer: https://rarestudy.in/" '
             f'-N 16 '
             f'--downloader aria2c '
             f'--downloader-args "aria2c:-x 16 -j 16 -s 16 -k 1M --no-conf" '
