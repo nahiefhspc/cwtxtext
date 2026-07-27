@@ -460,12 +460,13 @@ async def decrypt_and_merge_video(
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # ✅ STEP 2: Download using patched local MPD
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # ✅ FIX: Use file:// protocol for local file path
         abs_mpd_path = os.path.abspath(local_mpd)
         file_url = f"file://{abs_mpd_path}"
         
+        # ✅ FIX: Added --enable-file-urls to bypass yt-dlp security block
         cmd1 = (
-            f'yt-dlp -f "bv[height<={quality}]+ba/b" '
+            f'yt-dlp --enable-file-urls '
+            f'-f "bv[height<={quality}]+ba/b" '
             f'-o "{output_path}/file.%(ext)s" '
             f'--allow-unplayable-format '
             f'--no-check-certificate '
@@ -475,7 +476,7 @@ async def decrypt_and_merge_video(
             f'--retries 10 '
             f'--fragment-retries 10 '
             f'--no-warnings '
-            f'"{file_url}"'  # 👈 Passing file:// URL
+            f'"{file_url}"'
         )
         print(f"🔽 Downloading MPD: {cmd1}")
         subprocess.run(cmd1, shell=True)
