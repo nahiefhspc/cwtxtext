@@ -9,6 +9,7 @@ import aiofiles
 import asyncio
 import logging
 import requests
+import xml.etree.ElementTree as ET
 import tgcrypto
 import subprocess
 import shutil
@@ -390,8 +391,51 @@ async def decrypt_and_merge_video(
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # ✅ FIX: Removed aria2c. Using yt-dlp native downloader.
-        # yt-dlp native downloader perfectly preserves CloudFront query params and headers.
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ✅ STEP 1: Download MPD & Inject CloudFront Query Params
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+            'Referer': 'https://rarestudy.in/'
+        }
+        
+        print(f"🌐 Downloading and patching MPD manifest...")
+        resp = requests.get(mpd_url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            raise Exception(f"Failed to fetch MPD: HTTP {resp.status_code}")
+            
+        mpd_text = resp.text
+        parsed_mpd = urlparse(mpd_url)
+        query_string = f"?{parsed_mpd.query}" if parsed_mpd.query else ""
+        
+        # Parse XML and append query string to all segment URLs
+        root = ET.fromstring(mpd_text)
+        ns = root.tag.split('}')[0] + '}' if '}' in root.tag else ''
+        
+        for base in root.findall(f'.//{ns}BaseURL'):
+            if base.text and '?' not in base.text:
+                base.text += query_string
+                
+        for st in root.findall(f'.//{ns}SegmentTemplate'):
+            if st.get('media') and '?' not in st.get('media'):
+                st.set('media', st.get('media') + query_string)
+            if st.get('initialization') and '?' not in st.get('initialization'):
+                st.set('initialization', st.get('initialization') + query_string)
+                
+        for su in root.findall(f'.//{ns}SegmentURL'):
+            if su.get('media') and '?' not in su.get('media'):
+                su.set('media', su.get('media') + query_string
+
+        # Save the patched manifest locally
+        local_mpd = os.path.join(output_path, "manifest.mpd")
+        with open(local_mpd, "w", encoding="utf-8") as f:
+            f.write(ET.tostring(root, encoding='unicode'))
+            
+        print("✅ MPD patched successfully!")
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ✅ STEP 2: Download using patched local MPD
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         cmd1 = (
             f'yt-dlp -f "bv[height<={quality}]+ba/b" '
             f'-o "{output_path}/file.%(ext)s" '
@@ -399,15 +443,13 @@ async def decrypt_and_merge_video(
             f'--no-check-certificate '
             f'--add-header "User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36" '
             f'--add-header "Referer: https://rarestudy.in/" '
-            f'-N 16 '  # 16 parallel native connections
+            f'-N 16 '
             f'--retries 10 '
             f'--fragment-retries 10 '
             f'--no-warnings '
-            f'"{mpd_url}"'
+            f'"{local_mpd}"'  # 👈 Passing local file instead of URL
         )
         print(f"🔽 Downloading MPD: {cmd1}")
-        
-        # Using subprocess.run to block until download completes
         subprocess.run(cmd1, shell=True)
 
         avDir = list(output_path.iterdir())
@@ -418,6 +460,9 @@ async def decrypt_and_merge_video(
         audio_decrypted = False
 
         for data in avDir:
+            if data.name == "manifest.mpd": # Skip the manifest file
+                continue
+                
             if not video_decrypted and data.suffix in [".mp4", ".m4v", ".webm"]:
                 cmd2 = (
                     f'mp4decrypt {keys_string} --show-progress '
@@ -445,6 +490,7 @@ async def decrypt_and_merge_video(
         if not video_decrypted:
             remaining = list(output_path.iterdir())
             for data in remaining:
+                if data.name == "manifest.mpd": continue
                 if data.suffix in [".mp4", ".mkv", ".webm", ".m4v"]:
                     cmd_single = (
                         f'mp4decrypt {keys_string} --show-progress '
@@ -469,7 +515,7 @@ async def decrypt_and_merge_video(
             print(f"🔄 Merging: {cmd4}")
             os.system(cmd4)
 
-            for f in ["video.mp4", "audio.m4a"]:
+            for f in ["video.mp4", "audio.m4a", "manifest.mpd"]:
                 fp = output_path / f
                 if fp.exists():
                     fp.unlink()
@@ -480,6 +526,9 @@ async def decrypt_and_merge_video(
                 str(output_path / "video.mp4"),
                 str(output_path / f"{output_name}.mp4")
             )
+            # Cleanup manifest
+            if (output_path / "manifest.mpd").exists():
+                (output_path / "manifest.mpd").unlink()
 
         filename = output_path / f"{output_name}.mp4"
 
@@ -493,7 +542,6 @@ async def decrypt_and_merge_video(
     except Exception as e:
         print(f"❌ decrypt_and_merge error: {e}")
         raise
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ✅ FAST DOWNLOAD
