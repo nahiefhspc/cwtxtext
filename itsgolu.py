@@ -390,7 +390,8 @@ async def decrypt_and_merge_video(
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # ✅ HEADERS ADDED HERE
+        # ✅ FIX: Removed aria2c. Using yt-dlp native downloader.
+        # yt-dlp native downloader perfectly preserves CloudFront query params and headers.
         cmd1 = (
             f'yt-dlp -f "bv[height<={quality}]+ba/b" '
             f'-o "{output_path}/file.%(ext)s" '
@@ -398,13 +399,16 @@ async def decrypt_and_merge_video(
             f'--no-check-certificate '
             f'--add-header "User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36" '
             f'--add-header "Referer: https://rarestudy.in/" '
-            f'-N 16 '
-            f'--downloader aria2c '
-            f'--downloader-args "aria2c:-x 16 -j 16 -s 16 -k 1M --no-conf" '
+            f'-N 16 '  # 16 parallel native connections
+            f'--retries 10 '
+            f'--fragment-retries 10 '
+            f'--no-warnings '
             f'"{mpd_url}"'
         )
         print(f"🔽 Downloading MPD: {cmd1}")
-        os.system(cmd1)
+        
+        # Using subprocess.run to block until download completes
+        subprocess.run(cmd1, shell=True)
 
         avDir = list(output_path.iterdir())
         print(f"📁 Downloaded files: {avDir}")
