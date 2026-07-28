@@ -819,14 +819,31 @@ async def txt_handler(bot: Client, m: Message):
                     count += 1
                     failed_count += 1
                     continue
-    
-                # Split URL and Keys
+
+                
+
+# If it's the API URL, fetch the real MPD URL
+                if raw_url.startswith("https://againbwapis.vercel.app/"):
+                    for attempt in range(3):
+                        try:
+                            response = requests.get(raw_url, timeout=10)
+                            response.raise_for_status()
+                            raw_url = response.json()["url"]
+                            break
+                        except Exception:
+                            if attempt == 2:
+                                raise
+                            time.sleep(2)
+
+# Existing logic
                 if "*" in raw_url:
                     video_url = raw_url.split("*", 1)[0]
-                    keys_string = raw_url.split("*", 1)[1]                 
+                    keys_string = raw_url.split("*", 1)[1]
                 else:
                     video_url = raw_url
                     keys_string = ""
+    
+                # Split URL and Keys
     
                 # ===== Direct URL Based Detection =====
                 if "master.vd" in video_url and keys_string:
