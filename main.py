@@ -822,15 +822,19 @@ async def txt_handler(bot: Client, m: Message):
 
                 
 
-# If it's the API URL, fetch the real MPD URL
-                # Agar URL againbwapis wala hai, toh pehle JSON se actual URL nikalo
+                # ==========================================
+                # 1. API SE URL FETCH KARNA (SABSE PEHLE)
+                # ==========================================
                 if "againbwapis" in raw_url or "vercel.app" in raw_url:
                     try:
+                        import aiohttp
                         async with aiohttp.ClientSession() as session:
                             async with session.get(raw_url, timeout=30) as resp:
                                 if resp.status == 200:
                                     data = await resp.json()
                                     raw_url = data.get("url", "")
+                                    if not raw_url:
+                                        raise Exception("API se URL nahi mila")
                                 else:
                                     raise Exception(f"API Error: {resp.status}")
                     except Exception as e:
@@ -845,7 +849,9 @@ async def txt_handler(bot: Client, m: Message):
                         failed_count += 1
                         continue
 
-                # Ab actual video url aur keys ko separate karo
+                # ==========================================
+                # 2. URL AUR KEYS SEPARATE KARNA
+                # ==========================================
                 if "*" in raw_url:
                     video_url = raw_url.split("*", 1)[0]
                     keys_string = raw_url.split("*", 1)[1]                 
@@ -853,9 +859,18 @@ async def txt_handler(bot: Client, m: Message):
                     video_url = raw_url
                     keys_string = ""
 
-                url = video_url  # Yahan url variable assign ho raha hai
-    
-                # Split URL and Keys
+                url = video_url  # Yahan 'url' variable set ho raha hai
+
+                # ==========================================
+                # 3. ROUTING (MPD, M3U8, ya YT-DLP)
+                # ==========================================
+                # Yahan aapka m3u8 ya normal yt-dlp wala if/elif aayega
+                # if "m3u8" in url:
+                #     ...
+                # else:
+                #     ...
+
+
     
                 # ===== Direct URL Based Detection =====
                 if "master.vd" in video_url and keys_string:
@@ -986,7 +1001,7 @@ async def txt_handler(bot: Client, m: Message):
                 url = f"https://dragoapi.vercel.app/pdf/{url}"
 
             # ✅ NEW: Handle MPD*KID:KEY format (before encrypted.m check)
-            elif ".mpd" in url.split("*")[0].lower() if "*" in url else False:
+            elif ".ttmpd" in url.split("*")[0].lower() if "*" in url else False:
                 mpd_parts = url.split("*", 1)
                 url = mpd_parts[0]  # MPD URL
                 key_part = mpd_parts[1]  # KID:KEY or KID:KEY,KID:KEY
@@ -1268,21 +1283,34 @@ async def txt_handler(bot: Client, m: Message):
                             count += 1
                             await asyncio.sleep(1)
                             success = True
-                            break  # Loop break karo agar success ho gaya
+                            break  # Success pe loop break
                             
                         except Exception as e:
                             last_error = e
-                            # Agar file bani hai aur fail hua hai, toh delete karo
+                            # Partial fail hui file delete karo
                             if 'res_file' in locals() and res_file and os.path.exists(res_file):
                                 try:
                                     os.remove(res_file)
                                 except:
                                     pass
                             
-                            # 2 second wait karo before next retry
                             if attempt < max_retries:
-                                await asyncio.sleep(2)
+                                await asyncio.sleep(2)  # 2 sec wait before retry
                             continue
+
+                    # Agar 3 baar try karne ke baad bhi fail hua
+                    if not success:
+                        await prog.delete(True)
+                        await bot.send_message(
+                            channel_id,
+                            f'⚠️**DRM MPD Downloading Failed**⚠️\n'
+                            f'**Name** =>> `{str(count).zfill(3)} {name1}`\n\n'
+                            f'<blockquote><i><b>Failed Reason: {str(last_error)}\n❌ Failed after {max_retries} retries</b></i></blockquote>',
+                            disable_web_page_preview=True
+                        )
+                        count += 1
+                        failed_count += 1
+                        continue
 
                     # Agar 3 baar try karne ke baad bhi fail hua
                     if not success:
