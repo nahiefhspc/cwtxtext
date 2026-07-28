@@ -775,20 +775,24 @@ async def txt_handler(bot: Client, m: Message):
                     continue
 
             elif "rupkama.vercel.app" in url:
+                # ==========================================
+                # STEP 1: rupkama API se raw_url fetch karo
+                # ==========================================
                 max_retries = 3
                 api_success = False
                 raw_url = None
     
                 for attempt in range(1, max_retries + 1):
                     try:
-                        print(f"🔄 Deltaoo API Attempt {attempt}/{max_retries}...")
+                        print(f"🔄 Rupkama API Attempt {attempt}/{max_retries}...")
                         response = requests.get(url, timeout=60)
                         data = response.json()
             
                         if data.get("url"):
                             raw_url = data["url"]
                             api_success = True
-                            print(f"✅ Deltaoo API Success on Attempt {attempt}")
+                            print(f"✅ Rupkama API Success on Attempt {attempt}")
+                            print(f"📦 Raw URL from API: {raw_url[:80]}...")
                             break
                         else:
                             print(f"⚠️ Attempt {attempt} - No URL in response: {data}")
@@ -815,99 +819,130 @@ async def txt_handler(bot: Client, m: Message):
                             time.sleep(5)
     
                 if not api_success or not raw_url:
-                    print(f"❌ Deltaoo API Failed after {max_retries} attempts: {url}")
+                    print(f"❌ Rupkama API Failed after {max_retries} attempts")
+                    await bot.send_message(
+                        channel_id,
+                        f'⚠️ <b>Rupkama API Failed</b> ⚠️\n'
+                        f'<b>Name</b> =>> <code>{str(count).zfill(3)} {name1}</code>\n\n'
+                        f'<blockquote><i><b>Failed after {max_retries} attempts</b></i></blockquote>',
+                        disable_web_page_preview=True
+                    )
                     count += 1
                     failed_count += 1
                     continue
 
-                
-
                 # ==========================================
-                # 1. API SE URL FETCH KARNA (SABSE PEHLE)
+                # STEP 2: Check karo agar raw_url ek API URL hai
+                # (againbwapis.vercel.app type)
+                # Toh usse actual video URL fetch karo
                 # ==========================================
-                # --- API URL FETCH & SPLIT LOGIC ---
                 
-                # 1. Agar URL againbwapis/vercel wala hai, toh JSON se actual MPD URL nikalo
-                if "againbwapis" in raw_url or "vercel.app" in raw_url:
-                    try:
-                        import aiohttp
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(raw_url, timeout=30) as resp:
-                                if resp.status == 200:
-                                    data = await resp.json()
-                                    raw_url = data.get("url", "")
-                                    if not raw_url:
-                                        raise Exception("API response me 'url' nahi mila")
-                                else:
-                                    raise Exception(f"API Error: Status {resp.status}")
-                    except Exception as e:
-                        await bot.send_message(
-                            channel_id,
-                            f'⚠️**API URL Fetch Failed**⚠️\n'
-                            f'**Name** =>> `{str(count).zfill(3)} {name1}`\n\n'
-                            f'<blockquote><i><b>Failed Reason: {str(e)}</b></i></blockquote>',
-                            disable_web_page_preview=True
-                        )
-                        count += 1
-                        failed_count += 1
+                if any(x in raw_url for x in [
+                    "againbwapis.vercel.app",
+                    "batchId=",
+                    "subjectId=",
+                    "childId=",
+                    "scheduleId="
+                ]):
+                    print(f"🌐 Secondary API URL detected: {raw_url[:80]}...")
+                    api_fetch_success = False
+                    
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            print(f"🔄 Fetching from Secondary API... Attempt {attempt}/{max_retries}")
+                            
+                            fetch_url = raw_url
+                            if not fetch_url.startswith("http"):
+                                fetch_url = "https://" + fetch_url
+                            
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(
+                                    fetch_url,
+                                    timeout=aiohttp.ClientTimeout(total=30)
+                                ) as resp:
+                                    if resp.status == 200:
+                                        api_data = await resp.json(content_type=None)
+                                        fetched_url = api_data.get("url", "")
+                                        
+                                        if not fetched_url:
+                                            raise ValueError("❌ API response mein 'url' field nahi mila")
+                                        
+                                        raw_url = fetched_url
+                                        print(f"✅ Secondary API Fetch Success!")
+                                        print(f"📦 Fetched URL: {raw_url[:80]}...")
+                                        api_fetch_success = True
+                                        break
+                                    else:
+                                        raise Exception(f"API Status Error: {resp.status}")
+                                        
+                        except Exception as e:
+                            print(f"⚠️ Secondary API Fetch Attempt {attempt} Failed: {e}")
+                            if attempt < max_retries:
+                                print(f"⏳ Retrying in 3 seconds...")
+                                await asyncio.sleep(3)
+                            else:
+                                await bot.send_message(
+                                    channel_id,
+                                    f'⚠️ <b>Secondary API URL Fetch Failed</b> ⚠️\n'
+                                    f'<b>Name</b> =>> <code>{str(count).zfill(3)} {name1}</code>\n\n'
+                                    f'<blockquote><i><b>Failed Reason: {str(e)}\n'
+                                    f'❌ Failed after {max_retries} retries</b></i></blockquote>',
+                                    disable_web_page_preview=True
+                                )
+                                count += 1
+                                failed_count += 1
+                                api_fetch_success = False
+                    
+                    if not api_fetch_success:
                         continue
 
-                # 2. Ab actual video url aur keys ko separate karo
+                # ==========================================
+                # STEP 3: raw_url se video_url aur keys alag karo
+                # Format: video_url*KID:KEY,KID:KEY
+                # ==========================================
+                
                 if "*" in raw_url:
                     video_url = raw_url.split("*", 1)[0]
-                    keys_string = raw_url.split("*", 1)[1]                 
+                    keys_string = raw_url.split("*", 1)[1]
+                    print(f"🔑 Keys extracted: {keys_string}")
                 else:
                     video_url = raw_url
                     keys_string = ""
+                    print(f"ℹ️ No keys found in URL")
 
-                url = video_url  # Yahan 'url' variable assign ho raha hai  # Yahan 'url' variable set ho raha hai
+                url = video_url
+                print(f"📹 Final Video URL: {url[:80]}...")
 
                 # ==========================================
-                # 3. ROUTING (MPD, M3U8, ya YT-DLP)
+                # STEP 4: URL type detect karo
+                # MPD / M3U8 / Direct
                 # ==========================================
-                # Yahan aapka m3u8 ya normal yt-dlp wala if/elif aayega
-                # if "m3u8" in url:
-                #     ...
-                # else:
-                #     ...
-
-
-    
-                # ===== Direct URL Based Detection =====
-                if "master.vd" in video_url and keys_string:
+                
+                if ".mpd" in video_url.lower() and keys_string:
                     # MPD + Keys → DRM mode
-                    url = video_url
                     mpd = video_url
-                    print(f"🔐 MPD Mode")
-                    print(f"🔐 MPD URL: {url}")
+                    print(f"🔐 MPD DRM Mode Detected")
+                    print(f"🔐 MPD URL: {url[:80]}...")
                     print(f"🔑 Keys: {keys_string}")
-        
-                elif "main.m3u8" in video_url or ".m3u8" in video_url:
-                    # M3U8 → Normal mode (keys ignore)
-                    url = video_url
+
+                elif ".m3u8" in video_url.lower() or "master.m3u8" in video_url.lower():
+                    # M3U8 → Normal download mode
                     keys_string = ""
                     mpd = ""
-                    print(f"✅ M3U8 Mode: {url}")
-        
-                elif ".mvg" in video_url and keys_string:
-                    # Any other MPD + Keys
-                    url = video_url
+                    print(f"✅ M3U8 Mode Detected: {url[:80]}...")
+
+                elif ".mpd" in video_url.lower() and not keys_string:
+                    # MPD without keys
                     mpd = video_url
-                    print(f"🔐 MPD Mode")
-                    print(f"🔐 MPD URL: {url}")
-                    print(f"🔑 Keys: {keys_string}")
-        
+                    keys_string = ""
+                    print(f"📥 MPD without keys: {url[:80]}...")
+
                 else:
-                    # Fallback - direct download
-                    url = video_url
+                    # Direct download fallback
                     keys_string = ""
                     mpd = ""
-                    print(f"📥 Direct Mode: {url}")
+                    print(f"📥 Direct Download Mode: {url[:80]}...")
 
-
-                        
-
-                                
             elif "https://static-db.classx.co.in/" in url:
                 if "*" in url:
                     base_url, key = url.split("*", 1)
@@ -1001,11 +1036,10 @@ async def txt_handler(bot: Client, m: Message):
             if ".pdf*" in url:
                 url = f"https://dragoapi.vercel.app/pdf/{url}"
 
-            # ✅ NEW: Handle MPD*KID:KEY format (before encrypted.m check)
             elif ".mpd" in url.split("*")[0].lower() if "*" in url else False:
                 mpd_parts = url.split("*", 1)
-                url = mpd_parts[0]  # MPD URL
-                key_part = mpd_parts[1]  # KID:KEY or KID:KEY,KID:KEY
+                url = mpd_parts[0]
+                key_part = mpd_parts[1]
                 keys_list = key_part.split(",")
                 keys_string = " ".join([f"--key {k.strip()}" for k in keys_list])
                 mpd = url
@@ -1069,10 +1103,6 @@ async def txt_handler(bot: Client, m: Message):
                         time.sleep(e.x)
                         continue    
   
-                # Install: pip install curl-cffi
-
-
-
                 elif ".pdf" in url:
                     if "cwmediabkt99" in url:
                         max_retries = 3
@@ -1085,17 +1115,15 @@ async def txt_handler(bot: Client, m: Message):
                                 await asyncio.sleep(retry_delay)
                                 url = url.replace(" ", "%20")
                 
-                                # Extract domain and path
                                 domain_match = re.search(r'https?://([^/]+)', url)
                                 domain = domain_match.group(1) if domain_match else "cwmediabkt99.crwilladmin.com"
                 
-                                # Proper headers for this specific domain
                                 headers = {
                                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                                     'Accept': 'application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                                     'Accept-Language': 'en-US,en;q=0.9',
                                     'Accept-Encoding': 'gzip, deflate, br',
-                                    'Referer': f'https://{domain}/',  # Important!
+                                    'Referer': f'https://{domain}/',
                                     'Origin': f'https://{domain}',
                                     'Connection': 'keep-alive',
                                     'Sec-Fetch-Dest': 'document',
@@ -1114,12 +1142,11 @@ async def txt_handler(bot: Client, m: Message):
                                     http2=True,
                                     follow_redirects=True,
                                     timeout=60.0,
-                                    verify=False  # SSL verification disable
+                                    verify=False
                                 ) as client:
                                     response = await client.get(url, headers=headers)
                     
                                     if response.status_code == 200:
-                                        # Verify it's a PDF
                                         content_type = response.headers.get('content-type', '')
                                         if 'pdf' in content_type.lower() or response.content[:4] == b'%PDF':
                                             with open(f'{name}.pdf', 'wb') as file:
@@ -1246,9 +1273,12 @@ async def txt_handler(bot: Client, m: Message):
                         failed_count += 1
                         continue
 
-                # ✅ NEW: MPD with KID:KEY DRM handling
-                 elif "mpd" in url and keys_string:
-                    Show = f"<i><b>📥 DRM MPD Downloading & Decrypting 🔐</b></i>\n<blockquote><b>{str(count).zfill(3)} {name1}</b></blockquote>"
+                # ✅ MPD with KID:KEY DRM Download with Retry
+                elif "mpd" in url.lower() and keys_string:
+                    Show = (
+                        f"<i><b>📥 DRM MPD Downloading & Decrypting 🔐</b></i>\n"
+                        f"<blockquote><b>{str(count).zfill(3)}) {name1}</b></blockquote>"
+                    )
                     prog = await bot.send_message(channel_id, Show, disable_web_page_preview=True)
                     
                     max_retries = 3
@@ -1257,17 +1287,19 @@ async def txt_handler(bot: Client, m: Message):
                     
                     for attempt in range(1, max_retries + 1):
                         try:
-                            # Retry pe message update karo
                             if attempt > 1:
                                 try:
                                     await prog.edit_text(
                                         f"<i><b>📥 DRM MPD Downloading & Decrypting 🔐</b></i>\n"
-                                        f"<blockquote><b>{str(count).zfill(3)} {name1}</b>\n"
-                                        f"<i>🔄 Retry attempt {attempt}/{max_retries}...</i></blockquote>",
+                                        f"<blockquote><b>{str(count).zfill(3)}) {name1}</b>\n"
+                                        f"<i>🔄 Retry Attempt {attempt}/{max_retries}...</i></blockquote>",
                                         disable_web_page_preview=True
                                     )
                                 except:
                                     pass
+                                await asyncio.sleep(3)
+                            
+                            print(f"📥 DRM Download Attempt {attempt}/{max_retries}")
                             
                             drm_quality = raw_text97 if raw_text97 else raw_text2
                             res_file = await helper.decrypt_and_merge_video(
@@ -1281,37 +1313,41 @@ async def txt_handler(bot: Client, m: Message):
                                 prog, channel_id, watermark=watermark
                             )
                             
+                            print(f"✅ DRM Download Success on Attempt {attempt}")
                             count += 1
                             await asyncio.sleep(1)
                             success = True
-                            break  # Success pe loop break
+                            break
                             
                         except Exception as e:
                             last_error = e
-                            # Partial fail hui file delete karo
-                            if 'res_file' in locals() and res_file and os.path.exists(res_file):
-                                try:
+                            print(f"❌ Attempt {attempt}/{max_retries} Failed: {e}")
+                            
+                            # Failed file cleanup
+                            try:
+                                if 'res_file' in locals() and res_file and os.path.exists(str(res_file)):
                                     os.remove(res_file)
-                                except:
-                                    pass
+                            except:
+                                pass
                             
                             if attempt < max_retries:
-                                await asyncio.sleep(2)  # 2 sec wait before retry
-                            continue
-
-                    # Agar 3 baar try karne ke baad bhi fail hua
+                                print(f"⏳ Retrying in 3 seconds...")
+                                await asyncio.sleep(3)
+                    
                     if not success:
                         await prog.delete(True)
                         await bot.send_message(
                             channel_id,
-                            f'⚠️**DRM MPD Downloading Failed**⚠️\n'
-                            f'**Name** =>> `{str(count).zfill(3)} {name1}`\n\n'
-                            f'<blockquote><i><b>Failed Reason: {str(last_error)}\n❌ Failed after {max_retries} retries</b></i></blockquote>',
+                            f'⚠️ <b>DRM MPD Downloading Failed</b> ⚠️\n'
+                            f'<b>Name</b> =>> <code>{str(count).zfill(3)} {name1}</code>\n'
+                            f'<b>Attempts:</b> <code>{max_retries}/{max_retries}</code>\n\n'
+                            f'<blockquote><i><b>Failed Reason: {str(last_error)}</b></i></blockquote>',
                             disable_web_page_preview=True
                         )
                         count += 1
                         failed_count += 1
-                        continue
+                    
+                    continue
 
                 else:
                     Show = f"<i><b>📥 Fast Video Downloading</b></i>\n<blockquote><b>{str(count).zfill(3)}) {name1}</b></blockquote>"
