@@ -656,26 +656,63 @@ async def txt_handler(bot: Client, m: Message):
                 url = Vxy
 
             title = links[i][0]
-            raw_text97 = ""
-            name1 = ""
-            raw_text65 = ""
+            
+            # Variables initialize
+            raw_text97  = ""  # quality (old format)
+            raw_text65  = ""  # chapter id (old format)
+            raw_text210 = ""  # name (new format)
+            raw_text211 = ""  # date
+            raw_text212 = ""  # id
+            raw_text213 = ""  # batch
+            raw_text214 = ""  # teacher
+            raw_text215 = ""  # chapter
 
-            if "🌚" in title and "💀" in title:
-                try:
+            try:
+                # ✅ NEW FORMAT: 💀name💀😆date😆🤡id🤡😒batch😒🙄teacher🙄🤬chapter🤬
+                if "💀" in title and "😆" in title and "🤡" in title:
+                    
+                    m210 = re.search(r'💀(.*?)💀', title)
+                    raw_text210 = m210.group(1).strip() if m210 else ""
+
+                    m211 = re.search(r'😆(.*?)😆', title)
+                    raw_text211 = m211.group(1).strip() if m211 else ""
+
+                    m212 = re.search(r'🤡(.*?)🤡', title)
+                    raw_text212 = m212.group(1).strip() if m212 else ""
+
+                    m213 = re.search(r'😒(.*?)😒', title)
+                    raw_text213 = m213.group(1).strip() if m213 else ""
+
+                    m214 = re.search(r'🙄(.*?)🙄', title)
+                    raw_text214 = m214.group(1).strip() if m214 else ""
+
+                    m215 = re.search(r'🤬(.*?)🤬', title)
+                    raw_text215 = m215.group(1).strip() if m215 else ""
+
+                    print(f"✅ New Format Parsed: {raw_text210} | {raw_text213} | {raw_text215}")
+
+                # ✅ OLD FORMAT: 🌚quality🌚name💀chapterid💀
+                elif "🌚" in title and "💀" in title:
                     parts = title.split("🌚")
                     if len(parts) >= 3:
                         raw_text97 = parts[1].strip()
-                        remaining = parts[2].split("💀")
-                        if len(remaining) >= 3:
-                            name1 = remaining[0].strip()
-                            raw_text65 = remaining[1].strip()
-                        else:
-                            name1 = remaining[0].strip() if remaining else title.strip()
-                except IndexError:
-                    name1 = title.strip()
-            else:
-                name1 = title.strip()
+                        rem = parts[2].split("💀")
+                        raw_text210 = rem[0].strip() if rem else title.strip()
+                        raw_text65  = rem[1].strip() if len(rem) >= 2 else ""
+                    else:
+                        raw_text210 = title.strip()
 
+                # ✅ PLAIN FORMAT: Normal title
+                else:
+                    raw_text210 = title.strip()
+
+            except Exception as e:
+                print(f"Parsing error: {e}")
+                raw_text210 = title.strip()
+
+            # Aapke purane code ke hisaab se name1 set ho raha hai
+            name1 = raw_text210
+                 
             cleaned_name1 = name1.replace("(", "[").replace(")", "]").replace("_", "").replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
             name = f'[𝗛𝗔𝗖𝗞𝗛𝗘𝗜𝗦𝗧😈]{cleaned_name1[:60]}'
                  
@@ -958,17 +995,9 @@ async def txt_handler(bot: Client, m: Message):
 
     
             try:
-                cc = (
-                    f"<b>|🇮🇳| {cleaned_name1}</b>\n\n"
-                    f"<b>😎 ℚ𝕦𝕒𝕝𝕚𝕥𝕪 ➠ {raw_text97}p</b>\n\n"                
-                    f"<b>🧿 𝐁𝐀𝐓𝐂𝐇 ➤ {b_name}</b>\n\n"
-                    f"<b>ChapterId > {raw_text65}</b>"
-                )
-                cc1 = (
-                    f"<b>|🇮🇳| {cleaned_name1}</b>\n\n"
-                    f"<b>🧿 𝐁𝐀𝐓𝐂𝐇 ➤ {b_name}</b>\n\n"
-                    f"<b>ChapterId > {raw_text65}</b>"
-                )
+                cc = (f"<b>╔════════════════════╗</b>\n<b>{name1}</b>\n<b>╚════════════════════╝</b>\n<b>├ 🧑‍🏫 𝐅𝐚𝐜𝐮𝐥𝐭𝐲 ➜ {raw_text214}</b>\n<b>├ 📖 𝐒𝐮𝐛𝐣𝐞𝐜𝐭 ➜ {raw_text213}</b>\n<b>├ 📝 𝐂𝐡𝐚𝐩𝐭𝐞𝐫 ➜ {raw_text215}</b>\n<b>├ 🎯 𝐁𝐚𝐭𝐜𝐡 ➜ {b_name}</b>\n<b>├ 📅 𝐃𝐚𝐭𝐞 ➜ {raw_text211}</b>\n<b>└ 💎 𝐐𝐮𝐚𝐥𝐢𝐭𝐲 ➜ 720</b>\n\n<b>OPID >> {raw_text212}</b>")
+                cc1 = (f"<b>╔════════════════════╗</b>\n<b>{name1}</b>\n<b>╚════════════════════╝</b>\n<b>├ 🧑‍🏫 𝐅𝐚𝐜𝐮𝐥𝐭𝐲 ➜ {raw_text214}</b>\n<b>├ 📖 𝐒𝐮𝐛𝐣𝐞𝐜𝐭 ➜ {raw_text213}</b>\n<b>├ 📝 𝐂𝐡𝐚𝐩𝐭𝐞𝐫 ➜ {raw_text215}</b>\n<b>├ 🎯 𝐁𝐚𝐭𝐜𝐡 ➜ {b_name}</b>\n<b>└ 📅 𝐃𝐚𝐭𝐞 ➜ {raw_text211}</b>\n\n<b>OPID >> {raw_text212}</b>")
+            
                 cczip = f'[📁]Zip Id : {str(count).zfill(3)}\n**Zip Title :** `{name1} .zip`\n<blockquote><b>Batch Name :</b> {b_name}</blockquote>\n\n**Extracted by➤**{CR}\n' 
                 ccimg = (
                     f"<b>🏷️ Iɴᴅᴇx ID <b>: {str(count).zfill(3)} \n\n"
