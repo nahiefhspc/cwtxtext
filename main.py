@@ -825,6 +825,9 @@ async def txt_handler(bot: Client, m: Message):
                 # ==========================================
                 # 1. API SE URL FETCH KARNA (SABSE PEHLE)
                 # ==========================================
+                # --- API URL FETCH & SPLIT LOGIC ---
+                
+                # 1. Agar URL againbwapis/vercel wala hai, toh JSON se actual MPD URL nikalo
                 if "againbwapis" in raw_url or "vercel.app" in raw_url:
                     try:
                         import aiohttp
@@ -834,9 +837,9 @@ async def txt_handler(bot: Client, m: Message):
                                     data = await resp.json()
                                     raw_url = data.get("url", "")
                                     if not raw_url:
-                                        raise Exception("API se URL nahi mila")
+                                        raise Exception("API response me 'url' nahi mila")
                                 else:
-                                    raise Exception(f"API Error: {resp.status}")
+                                    raise Exception(f"API Error: Status {resp.status}")
                     except Exception as e:
                         await bot.send_message(
                             channel_id,
@@ -849,9 +852,7 @@ async def txt_handler(bot: Client, m: Message):
                         failed_count += 1
                         continue
 
-                # ==========================================
-                # 2. URL AUR KEYS SEPARATE KARNA
-                # ==========================================
+                # 2. Ab actual video url aur keys ko separate karo
                 if "*" in raw_url:
                     video_url = raw_url.split("*", 1)[0]
                     keys_string = raw_url.split("*", 1)[1]                 
@@ -859,7 +860,7 @@ async def txt_handler(bot: Client, m: Message):
                     video_url = raw_url
                     keys_string = ""
 
-                url = video_url  # Yahan 'url' variable set ho raha hai
+                url = video_url  # Yahan 'url' variable assign ho raha hai  # Yahan 'url' variable set ho raha hai
 
                 # ==========================================
                 # 3. ROUTING (MPD, M3U8, ya YT-DLP)
@@ -1001,7 +1002,7 @@ async def txt_handler(bot: Client, m: Message):
                 url = f"https://dragoapi.vercel.app/pdf/{url}"
 
             # ✅ NEW: Handle MPD*KID:KEY format (before encrypted.m check)
-            elif ".ttmpd" in url.split("*")[0].lower() if "*" in url else False:
+            elif ".mpd" in url.split("*")[0].lower() if "*" in url else False:
                 mpd_parts = url.split("*", 1)
                 url = mpd_parts[0]  # MPD URL
                 key_part = mpd_parts[1]  # KID:KEY or KID:KEY,KID:KEY
@@ -1246,7 +1247,7 @@ async def txt_handler(bot: Client, m: Message):
                         continue
 
                 # ✅ NEW: MPD with KID:KEY DRM handling
-                elif "mpd" in url and keys_string:
+                 elif "mpd" in url and keys_string:
                     Show = f"<i><b>📥 DRM MPD Downloading & Decrypting 🔐</b></i>\n<blockquote><b>{str(count).zfill(3)} {name1}</b></blockquote>"
                     prog = await bot.send_message(channel_id, Show, disable_web_page_preview=True)
                     
@@ -1297,20 +1298,6 @@ async def txt_handler(bot: Client, m: Message):
                             if attempt < max_retries:
                                 await asyncio.sleep(2)  # 2 sec wait before retry
                             continue
-
-                    # Agar 3 baar try karne ke baad bhi fail hua
-                    if not success:
-                        await prog.delete(True)
-                        await bot.send_message(
-                            channel_id,
-                            f'⚠️**DRM MPD Downloading Failed**⚠️\n'
-                            f'**Name** =>> `{str(count).zfill(3)} {name1}`\n\n'
-                            f'<blockquote><i><b>Failed Reason: {str(last_error)}\n❌ Failed after {max_retries} retries</b></i></blockquote>',
-                            disable_web_page_preview=True
-                        )
-                        count += 1
-                        failed_count += 1
-                        continue
 
                     # Agar 3 baar try karne ke baad bhi fail hua
                     if not success:
