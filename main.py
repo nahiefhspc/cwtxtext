@@ -1213,7 +1213,7 @@ async def txt_handler(bot: Client, m: Message):
                                 except:
                                     pass
                             
-                            drm_quality = raw_text97 if raw_text97 else raw_text2
+                            drm_quality = "720"
                             res_file = await helper.decrypt_and_merge_video(
                                 url, keys_string, path, name, drm_quality
                             )
