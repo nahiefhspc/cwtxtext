@@ -714,7 +714,7 @@ async def txt_handler(bot: Client, m: Message):
             name1 = raw_text210
                  
             cleaned_name1 = name1.replace("(", "[").replace(")", "]").replace("_", "").replace("\t", "").replace(":", "").replace("/", "").replace("+", "").replace("#", "").replace("|", "").replace("@", "").replace("*", "").replace(".", "").replace("https", "").replace("http", "").strip()
-            name = f'[𝗛𝗔𝗖𝗞𝗛𝗘𝗜𝗦𝗧😈]{cleaned_name1[:60]}'
+            name = f'{cleaned_name1[:60]}'
                  
             user_id = m.from_user.id
             
