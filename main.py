@@ -34,7 +34,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 # ⚙️ Pyrogram
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters, idle, enums
 from pyrogram.handlers import MessageHandler
 from pyrogram.types import (
     Message,
@@ -52,6 +52,8 @@ from pyrogram.errors import (
     AuthKeyUnregistered,
     ChatAdminRequired,
     PeerIdInvalid,
+    ChannelPrivate,
+    ChannelInvalid,
     RPCError
 )
 from pyrogram.errors.exceptions.bad_request_400 import MessageNotModified
@@ -83,19 +85,236 @@ userbot = None
 timeout_duration = 300  # 5 minutes
 
 
-# Initialize bot with random session
+# Initialize bot (REMOVED in_memory=True so session file saves access_hash permanently)
 bot = Client(
     "ugx",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
     workers=300,
-    sleep_threshold=60,
-    in_memory=True
+    sleep_threshold=60
 )
 
 # Register command handlers
 register_clean_handler(bot)
+
+
+# ═══════════════════════════════════════════════════════════
+# CHANNEL PEER RESOLVER - Caches all channel peers on startup
+# ═══════════════════════════════════════════════════════════
+
+async def resolve_all_known_channels(bot, db):
+    """
+    Called on bot startup to cache all channel peers in Pyrogram.
+    Sends a temporary message to force peer caching.
+    """
+    try:
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username
+    except Exception as e:
+        logging.error(f"Failed to get bot username for channel resolution: {e}")
+        return
+
+    channel_ids = db.get_all_authorized_channels(bot_username)
+
+    if not channel_ids:
+        logging.info("No authorized channels found to resolve.")
+        return
+
+    logging.info(f"Resolving {len(channel_ids)} authorized channels...")
+
+    success_count = 0
+    failure_count = 0
+
+    for channel_id in channel_ids:
+        try:
+            chat = await bot.get_chat(channel_id)
+            logging.info(f"✅ Resolved channel: {chat.title} ({channel_id})")
+            
+            # Send temporary message to fully cache access rights
+            try:
+                temp_msg = await bot.send_message(
+                    channel_id, 
+                    "🔄 Bot restarted. Caching channel peer..."
+                )
+                await asyncio.sleep(0.5)
+                await temp_msg.delete()
+            except Exception as e:
+                logging.warning(f"Could not send temp message to {channel_id}: {e}")
+            
+            success_count += 1
+        except FloodWait as e:
+            logging.warning(f"FloodWait {e.value}s for channel {channel_id}, sleeping...")
+            await asyncio.sleep(e.value + 2)
+            try:
+                chat = await bot.get_chat(channel_id)
+                try:
+                    temp_msg = await bot.send_message(channel_id, "🔄 Bot restarted. Caching channel peer...")
+                    await asyncio.sleep(0.5)
+                    await temp_msg.delete()
+                except:
+                    pass
+                success_count += 1
+            except Exception as e2:
+                logging.warning(f"Failed to resolve channel {channel_id} after FloodWait: {e2}")
+                failure_count += 1
+        except PeerIdInvalid:
+            logging.warning(f"PeerIdInvalid for channel {channel_id} - Session file does not have access hash. User must send /start in channel.")
+            failure_count += 1
+        except ChannelPrivate:
+            logging.warning(f"ChannelPrivate for channel {channel_id} - bot not member or channel is private")
+            failure_count += 1
+        except Exception as e:
+            logging.warning(f"Failed to resolve channel {channel_id}: {e}")
+            failure_count += 1
+
+        await asyncio.sleep(0.5)
+
+    logging.info(f"Channel resolution complete: {success_count} success, {failure_count} failure out of {len(channel_ids)} total")
+
+
+# ═══════════════════════════════════════════════════════════
+# CHANNEL VALIDATION FUNCTION - Validates and caches channel peer
+# ═══════════════════════════════════════════════════════════
+
+async def validate_and_cache_channel(bot, channel_id_str):
+    """
+    Validates format, checks admin status (Pyrogram v2 compatible), 
+    and sends a temporary message to verify posting permissions.
+    """
+    # ━━━ Step 1 - Format Validation ━━━
+    channel_id_str = channel_id_str.strip()
+
+    try:
+        channel_id = int(channel_id_str)
+    except ValueError:
+        return None, (
+            "❌ <b>Invalid Channel ID</b>\n\n"
+            "Please send a valid channel ID.\n"
+            "Example: <code>-1001234567890</code>\n\n"
+            "💡 <b>How to get Channel ID:</b>\n"
+            "1. Add @userinfobot to your channel\n"
+            "2. Forward a message from your channel to it\n"
+            "3. It will give you the channel ID"
+        ), None
+
+    if channel_id >= 0:
+        return None, (
+            "❌ <b>Invalid Channel ID Format</b>\n\n"
+            "Channel ID must be a negative number starting with <code>-100</code>.\n"
+            "Example: <code>-1001234567890</code>\n\n"
+            "💡 <b>How to get Channel ID:</b>\n"
+            "1. Add @userinfobot to your channel\n"
+            "2. Forward a message from your channel to it\n"
+            "3. It will give you the channel ID"
+        ), None
+
+    # ━━━ Step 2 - Peer Resolution ━━━
+    try:
+        chat = await bot.get_chat(channel_id)
+    except PeerIdInvalid:
+        return None, (
+            "❌ <b>PeerIdInvalid Error</b>\n\n"
+            "The bot cannot find this channel because it hasn't cached its access hash yet.\n\n"
+            "💡 <b>Permanent Fix (Do this once):</b>\n"
+            "1. Go to your channel\n"
+            "2. Send <code>/start</code> in the channel\n"
+            "3. Come back here and run <code>/addchannel -100XXXXXXXXX</code> again\n\n"
+            "<i>This is required only once. After this, the session file will remember the channel forever.</i>"
+        ), None
+    except ChannelPrivate:
+        return None, (
+            "❌ <b>Channel Access Denied</b>\n\n"
+            "The bot is not a member of this channel or the channel is private.\n\n"
+            "💡 <b>Fix:</b>\n"
+            "1. Add the bot to your channel\n"
+            "2. Promote the bot as admin\n"
+            "3. Try again"
+        ), None
+    except FloodWait as e:
+        logging.warning(f"FloodWait {e.value}s during channel validation, retrying...")
+        await asyncio.sleep(e.value + 2)
+        try:
+            chat = await bot.get_chat(channel_id)
+        except Exception as e2:
+            return None, (
+                f"❌ <b>Failed to access channel</b>\n\n"
+                f"Reason: <code>{str(e2)}</code>\n\n"
+                f"Please try again after some time."
+            ), None
+    except Exception as e:
+        return None, (
+            f"❌ <b>Failed to access channel</b>\n\n"
+            f"Reason: <code>{str(e)}</code>"
+        ), None
+
+    # ━━━ Step 3 - Admin Check (FIXED FOR PYROGRAM V2) ━━━
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(channel_id, me.id)
+
+        is_admin = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+        
+        if not is_admin:
+            return None, (
+                f"❌ <b>Bot is Not Admin</b>\n\n"
+                f"Channel: <b>{chat.title}</b>\n"
+                f"ID: <code>{channel_id}</code>\n\n"
+                f"The bot must be an admin in this channel to send messages.\n\n"
+                f"💡 <b>Fix:</b>\n"
+                f"1. Go to channel settings\n"
+                f"2. Add the bot as admin\n"
+                f"3. Grant 'Post Messages' permission\n"
+                f"4. Try again"
+            ), None
+
+        if member.status == enums.ChatMemberStatus.ADMINISTRATOR:
+            if not member.privileges or not member.privileges.can_post_messages:
+                return None, (
+                    f"❌ <b>Missing Permission</b>\n\n"
+                    f"Channel: <b>{chat.title}</b>\n"
+                    f"ID: <code>{channel_id}</code>\n\n"
+                    f"The bot is admin but doesn't have 'Post Messages' permission.\n\n"
+                    f"💡 <b>Fix:</b>\n"
+                    f"1. Go to channel admin settings\n"
+                    f"2. Edit bot's permissions\n"
+                    f"3. Enable 'Post Messages'\n"
+                    f"4. Try again"
+                ), None
+
+    except ChatAdminRequired:
+        return None, (
+            f"❌ <b>Admin Access Required</b>\n\n"
+            f"Channel: <b>{chat.title}</b>\n"
+            f"ID: <code>{channel_id}</code>\n\n"
+            f"The bot needs admin rights in this channel."
+        ), None
+    except Exception as e:
+        return None, (
+            f"❌ <b>Admin check failed</b>\n\n"
+            f"Channel: <b>{chat.title}</b>\n"
+            f"ID: <code>{channel_id}</code>\n"
+            f"Reason: <code>{str(e)}</code>"
+        ), None
+
+    # ━━━ Step 4 - Send Temporary Message to verify actual posting rights ━━━
+    try:
+        temp_msg = await bot.send_message(
+            channel_id, 
+            "🔄 Verifying channel access..."
+        )
+        await asyncio.sleep(1)
+        await temp_msg.delete()
+    except Exception as e:
+        return None, (
+            f"❌ <b>Failed to send test message</b>\n\n"
+            f"Channel: <b>{chat.title}</b>\n"
+            f"ID: <code>{channel_id}</code>\n"
+            f"Reason: <code>{str(e)}</code>"
+        ), None
+
+    return channel_id, None, chat
+
 
 @bot.on_message(filters.command("setlog") & filters.private)
 async def set_log_channel_cmd(client: Client, message: Message):
@@ -166,6 +385,285 @@ async def get_log_channel_cmd(client: Client, message: Message):
 
     except Exception as e:
         await message.reply_text(f"❌ Error: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════
+# CHANNEL MANAGEMENT COMMANDS
+# ═══════════════════════════════════════════════════════════
+
+@bot.on_message(filters.command("addchannel") & filters.private)
+async def add_channel_cmd(client: Client, message: Message):
+    """Add an authorized channel for the bot"""
+    try:
+        if not db.is_admin(message.from_user.id):
+            await message.reply_text("⚠️ You are not authorized to use this command.")
+            return
+
+        args = message.text.split()
+        if len(args) != 2:
+            await message.reply_text(
+                "❌ <b>Invalid format!</b>\n\n"
+                "Use: <code>/addchannel -100XXXXXXXXX</code>\n"
+                "Example: <code>/addchannel -1001234567890</code>"
+            )
+            return
+
+        channel_id_str = args[1]
+
+        channel_id, error, chat_info = await validate_and_cache_channel(client, channel_id_str)
+
+        if error:
+            await message.reply_text(error)
+            return
+
+        bot_username = client.me.username
+
+        added = db.add_authorized_channel(
+            bot_username,
+            channel_id,
+            chat_info.title,
+            message.from_user.id
+        )
+
+        if added:
+            await message.reply_text(
+                f"✅ <b>Channel Added Successfully!</b>\n\n"
+                f"📌 Title: <b>{chat_info.title}</b>\n"
+                f"🆔 ID: <code>{channel_id}</code>\n"
+                f"🤖 Bot: @{bot_username}\n"
+                f"👤 Added by: <code>{message.from_user.id}</code>"
+            )
+            logging.info(f"Channel {chat_info.title} ({channel_id}) added by {message.from_user.id}")
+        else:
+            await message.reply_text(
+                f"⚠️ <b>This channel is already authorized!</b>\n\n"
+                f"📌 Title: <b>{chat_info.title}</b>\n"
+                f"🆔 ID: <code>{channel_id}</code>"
+            )
+
+    except Exception as e:
+        logging.error(f"Add channel command error: {e}")
+        await message.reply_text(f"❌ Error: <code>{str(e)}</code>")
+
+
+@bot.on_message(filters.command("removechannel") & filters.private)
+async def remove_channel_cmd(client: Client, message: Message):
+    """Remove an authorized channel for the bot"""
+    try:
+        if not db.is_admin(message.from_user.id):
+            await message.reply_text("⚠️ You are not authorized to use this command.")
+            return
+
+        args = message.text.split()
+        if len(args) != 2:
+            await message.reply_text(
+                "❌ <b>Invalid format!</b>\n\n"
+                "Use: <code>/removechannel -100XXXXXXXXX</code>\n"
+                "Example: <code>/removechannel -1001234567890</code>"
+            )
+            return
+
+        channel_id_str = args[1].strip()
+
+        try:
+            channel_id = int(channel_id_str)
+        except ValueError:
+            await message.reply_text("❌ Invalid channel ID. Please use a valid number.")
+            return
+
+        if channel_id >= 0:
+            await message.reply_text("❌ Channel ID must be a negative number starting with -100.")
+            return
+
+        bot_username = client.me.username
+
+        channel_info = db.get_channel_info(bot_username, channel_id)
+        channel_title = channel_info.get("channel_title", "Unknown") if channel_info else "Unknown"
+
+        removed = db.remove_authorized_channel(bot_username, channel_id)
+
+        if removed:
+            await message.reply_text(
+                f"✅ <b>Channel Removed Successfully!</b>\n\n"
+                f"📌 Title: <b>{channel_title}</b>\n"
+                f"🆔 ID: <code>{channel_id}</code>\n"
+                f"🤖 Bot: @{bot_username}"
+            )
+            logging.info(f"Channel {channel_title} ({channel_id}) removed by {message.from_user.id}")
+        else:
+            await message.reply_text(
+                f"❌ <b>Channel not found</b> in authorized list.\n\n"
+                f"🆔 ID: <code>{channel_id}</code>\n\n"
+                f"Use /listchannels to see all authorized channels."
+            )
+
+    except Exception as e:
+        logging.error(f"Remove channel command error: {e}")
+        await message.reply_text(f"❌ Error: <code>{str(e)}</code>")
+
+
+@bot.on_message(filters.command("listchannels") & filters.private)
+async def list_channels_cmd(client: Client, message: Message):
+    """List all authorized channels for the bot"""
+    try:
+        if not db.is_admin(message.from_user.id):
+            await message.reply_text("⚠️ You are not authorized to use this command.")
+            return
+
+        bot_username = client.me.username
+        channels = db.get_all_channels_info(bot_username)
+
+        if not channels:
+            await message.reply_text(
+                "📋 <b>No channels added yet.</b>\n\n"
+                "Use <code>/addchannel -100XXXXXXXXX</code> to add a channel."
+            )
+            return
+
+        text = f"📋 <b>Authorized Channels List</b>\n"
+        text += f"🤖 Bot: @{bot_username}\n"
+        text += f"📊 Total Channels: {len(channels)}\n"
+        text += f"{'━' * 30}\n\n"
+
+        for idx, ch in enumerate(channels, 1):
+            title = ch.get("channel_title", "Unknown")
+            ch_id = ch.get("channel_id", "Unknown")
+            added_by = ch.get("added_by", "Unknown")
+            added_date = ch.get("added_date", "Unknown")
+
+            text += (
+                f"┌─────────────────────\n"
+                f"│ <b>#{idx}</b> 📌 <b>{title}</b>\n"
+                f"│ 🆔 <code>{ch_id}</code>\n"
+                f"│ 👤 Added by: <code>{added_by}</code>\n"
+                f"│ 📅 Date: <code>{added_date}</code>\n"
+                f"└─────────────────────\n\n"
+            )
+
+        await message.reply_text(text)
+        logging.info(f"Listed {len(channels)} channels for admin {message.from_user.id}")
+
+    except Exception as e:
+        logging.error(f"List channels command error: {e}")
+        await message.reply_text(f"❌ Error: <code>{str(e)}</code>")
+
+
+@bot.on_message(filters.command("resolve") & filters.private)
+async def resolve_channel_cmd(client: Client, message: Message):
+    """Manually force Pyrogram to cache a specific channel peer"""
+    try:
+        if not db.is_admin(message.from_user.id):
+            await message.reply_text("⚠️ You are not authorized to use this command.")
+            return
+
+        args = message.text.split()
+        if len(args) != 2:
+            await message.reply_text(
+                "❌ <b>Invalid format!</b>\n\n"
+                "Use: <code>/resolve -100XXXXXXXXX</code>\n"
+                "Example: <code>/resolve -1001234567890</code>"
+            )
+            return
+
+        channel_id_str = args[1].strip()
+
+        try:
+            channel_id = int(channel_id_str)
+        except ValueError:
+            await message.reply_text("❌ Invalid channel ID. Please use a valid number.")
+            return
+
+        if channel_id >= 0:
+            await message.reply_text("❌ Channel ID must be a negative number starting with -100.")
+            return
+
+        status_msg = await message.reply_text("🔄 Resolving channel peer...")
+
+        try:
+            chat = await client.get_chat(channel_id)
+            await status_msg.edit_text(
+                f"✅ <b>Channel Resolved Successfully!</b>\n\n"
+                f"📌 Title: <b>{chat.title}</b>\n"
+                f"🆔 ID: <code>{channel_id}</code>\n"
+                f"📊 Type: <code>{chat.type}</code>\n\n"
+                f"Channel peer has been cached in Pyrogram."
+            )
+            logging.info(f"Manually resolved channel {chat.title} ({channel_id})")
+        except PeerIdInvalid:
+            await status_msg.edit_text(
+                f"❌ <b>PeerIdInvalid</b>\n\n"
+                f"The bot cannot find this channel.\n"
+                f"Make sure the bot is a member of this channel.\n\n"
+                f"🆔 ID: <code>{channel_id}</code>"
+            )
+        except ChannelPrivate:
+            await status_msg.edit_text(
+                f"❌ <b>ChannelPrivate</b>\n\n"
+                f"The bot is not a member of this channel or it's private.\n\n"
+                f"🆔 ID: <code>{channel_id}</code>"
+            )
+        except FloodWait as e:
+            logging.warning(f"FloodWait {e.value}s during manual resolve")
+            await asyncio.sleep(e.value + 2)
+            try:
+                chat = await client.get_chat(channel_id)
+                await status_msg.edit_text(
+                    f"✅ <b>Channel Resolved (after FloodWait)!</b>\n\n"
+                    f"📌 Title: <b>{chat.title}</b>\n"
+                    f"🆔 ID: <code>{channel_id}</code>"
+                )
+            except Exception as e2:
+                await status_msg.edit_text(
+                    f"❌ <b>Failed after FloodWait</b>\n\n"
+                    f"Reason: <code>{str(e2)}</code>"
+                )
+        except Exception as e:
+            await status_msg.edit_text(
+                f"❌ <b>Failed to resolve channel</b>\n\n"
+                f"Reason: <code>{str(e)}</code>"
+            )
+
+    except Exception as e:
+        logging.error(f"Resolve channel command error: {e}")
+        await message.reply_text(f"❌ Error: <code>{str(e)}</code>")
+
+
+@bot.on_message(filters.command("testchannel") & filters.private)
+async def test_channel_cmd(client: Client, message: Message):
+    """Test sending a message to a channel and delete it"""
+    try:
+        if not db.is_admin(message.from_user.id):
+            await message.reply_text("⚠️ You are not authorized to use this command.")
+            return
+
+        args = message.text.split()
+        if len(args) != 2:
+            await message.reply_text(
+                "❌ <b>Invalid format!</b>\n\n"
+                "Use: <code>/testchannel -100XXXXXXXXX</code>\n"
+                "Example: <code>/testchannel -1001234567890</code>"
+            )
+            return
+
+        channel_id_str = args[1]
+
+        channel_id, error, chat_info = await validate_and_cache_channel(client, channel_id_str)
+
+        if error:
+            await message.reply_text(error)
+            return
+
+        status_msg = await message.reply_text(
+            f"✅ <b>Channel is valid and test message was sent successfully!</b>\n\n"
+            f"📌 Title: <b>{chat_info.title}</b>\n"
+            f"🆔 ID: <code>{channel_id}</code>"
+        )
+        logging.info(f"Test channel successful for {chat_info.title} ({channel_id})")
+
+    except Exception as e:
+        logging.error(f"Test channel command error: {e}")
+        await message.reply_text(f"❌ Error: <code>{str(e)}</code>")
+
 
 # Re-register auth commands
 bot.add_handler(MessageHandler(auth.add_user_cmd, filters.command("add") & filters.private))
@@ -258,7 +756,7 @@ async def restart_handler(_, m):
 async def start(bot: Client, m: Message):
     try:
         if m.chat.type == "channel":
-            if not db.is_channel_authorized(m.chat.id, bot.me.username):
+            if not db.is_channel_authorized(bot.me.username, m.chat.id):
                 return
                 
             await m.reply_text(
@@ -295,6 +793,11 @@ async def start(bot: Client, m: Message):
                 commands_list += (
                     "\n**👑 Admin Commands**\n"
                     "• /users - List all users\n"
+                    "• /addchannel - Add authorized channel\n"
+                    "• /removechannel - Remove authorized channel\n"
+                    "• /listchannels - List all channels\n"
+                    "• /resolve - Manually resolve channel peer\n"
+                    "• /testchannel - Test channel access\n"
                 )
             
             await m.reply_photo(
@@ -316,7 +819,7 @@ async def start(bot: Client, m: Message):
 def auth_check_filter(_, client, message):
     try:
         if message.chat.type == "channel":
-            return db.is_channel_authorized(message.chat.id, client.me.username)
+            return db.is_channel_authorized(client.me.username, message.chat.id)
         else:
             return db.is_user_authorized(message.from_user.id, client.me.username)
     except Exception:
@@ -350,8 +853,9 @@ async def call_html_handler(bot: Client, message: Message):
 
 @bot.on_message(filters.command(["logs"]) & auth_filter)
 async def send_logs(client: Client, m: Message):
+    bot_username = client.me.username
     if m.chat.type == "channel":
-        if not db.is_channel_authorized(m.chat.id, bot_username):
+        if not db.is_channel_authorized(bot_username, m.chat.id):
             return
     else:
         if not db.is_user_authorized(m.from_user.id, bot_username):
@@ -373,7 +877,7 @@ async def txt_handler(bot: Client, m: Message):
     bot_username = bot_info.username
 
     if m.chat.type == "channel":
-        if not db.is_channel_authorized(m.chat.id, bot_username):
+        if not db.is_channel_authorized(bot_username, m.chat.id):
             return
     else:
         if not db.is_user_authorized(m.from_user.id, bot_username):
@@ -616,7 +1120,7 @@ async def txt_handler(bot: Client, m: Message):
     await editable.edit("__**📢 Provide the Channel ID or send /d__\n\n<blockquote>🔹Send Your Channel ID where you want upload files.\n\nEx : -100XXXXXXXXX</blockquote>\n**")
     try:
         input7: Message = await bot.listen(editable.chat.id, timeout=timeout_duration)
-        raw_text7 = input7.text
+        raw_text7 = input7.text.strip()
         await input7.delete(True)
     except asyncio.TimeoutError:
         raw_text7 = '/d'
@@ -624,7 +1128,21 @@ async def txt_handler(bot: Client, m: Message):
     if "/d" in raw_text7:
         channel_id = m.chat.id
     else:
-        channel_id = raw_text7    
+        validating_msg = await m.reply_text("🔄 Validating channel...")
+        channel_id, error, chat_info = await validate_and_cache_channel(
+            bot, raw_text7
+        )
+        await validating_msg.delete()
+        
+        if error:
+            await editable.delete()
+            await m.reply_text(error)
+            return
+            
+        await m.reply_text(
+            f"✅ Channel Verified: {chat_info.title}\n"
+            f"ID: {channel_id}"
+        )
     await editable.delete()
 
     try:
@@ -993,7 +1511,7 @@ async def txt_handler(bot: Client, m: Message):
             else:
                 cmd = f'yt-dlp -f "{ytf}" "{url}" -o "{name}.mp4"'
 
-    
+
             try:
                 cc = (f"<b>╔════════════════════╗</b>\n<b>{name1}</b>\n<b>╚════════════════════╝</b>\n<b>├ 🧑‍🏫 𝐅𝐚𝐜𝐮𝐥𝐭𝐲 ➜ {raw_text214}</b>\n<b>├ 📖 𝐒𝐮𝐛𝐣𝐞𝐜𝐭 ➜ {raw_text213}</b>\n<b>├ 📝 𝐂𝐡𝐚𝐩𝐭𝐞𝐫 ➜ {raw_text215}</b>\n<b>├ 🎯 𝐁𝐚𝐭𝐜𝐡 ➜ {b_name}</b>\n<b>├ 📅 𝐃𝐚𝐭𝐞 ➜ {raw_text211}</b>\n<b>└ 💎 𝐐𝐮𝐚𝐥𝐢𝐭𝐲 ➜ 720</b>\n\n<b>OPID >> {raw_text212}</b>")
                 cc1 = (f"<b>╔════════════════════╗</b>\n<b>{name1}</b>\n<b>╚════════════════════╝</b>\n<b>├ 🧑‍🏫 𝐅𝐚𝐜𝐮𝐥𝐭𝐲 ➜ {raw_text214}</b>\n<b>├ 📖 𝐒𝐮𝐛𝐣𝐞𝐜𝐭 ➜ {raw_text213}</b>\n<b>├ 📝 𝐂𝐡𝐚𝐩𝐭𝐞𝐫 ➜ {raw_text215}</b>\n<b>├ 🎯 𝐁𝐚𝐭𝐜𝐡 ➜ {b_name}</b>\n<b>└ 📅 𝐃𝐚𝐭𝐞 ➜ {raw_text211}</b>\n\n<b>OPID >> {raw_text212}</b>")
@@ -1036,7 +1554,7 @@ async def txt_handler(bot: Client, m: Message):
                 
                                 headers = {
                                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                                    'Accept': 'application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                    'Accept': 'application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
                                     'Accept-Language': 'en-US,en;q=0.9',
                                     'Accept-Encoding': 'gzip, deflate, br',
                                     'Referer': f'https://{domain}/',
@@ -1408,6 +1926,11 @@ async def back_to_start_callback(client, callback_query: CallbackQuery):
         commands_list += (
             "\n**👑 Admin Commands**\n"
             "• /users - List all users\n"
+            "• /addchannel - Add authorized channel\n"
+            "• /removechannel - Remove authorized channel\n"
+            "• /listchannels - List all channels\n"
+            "• /resolve - Manually resolve channel peer\n"
+            "• /testchannel - Test channel access\n"
         )
     
     await callback_query.message.edit_media(
@@ -1423,6 +1946,34 @@ async def back_to_start_callback(client, callback_query: CallbackQuery):
             ]
         ])
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# STARTUP INTEGRATION (Without breaking bot.run())
+# ═══════════════════════════════════════════════════════════
+
+async def on_startup(bot):
+    await asyncio.sleep(2)
+    await resolve_all_known_channels(bot, db)
+    try:
+        await bot.send_message(OWNER_ID, "Bot is live! All channels resolved.")
+    except:
+        pass
+
+# Override bot.run to perfectly integrate startup tasks before idle loop
+def custom_run():
+    loop = asyncio.get_event_loop()
+    async def main():
+        await bot.start()
+        await on_startup(bot)
+        await idle()
+        await bot.stop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        pass
+
+bot.run = custom_run
 
 print("Bot Started...")
 bot.run()
