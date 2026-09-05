@@ -28,6 +28,7 @@ class Database:
         self.db: Optional[MongoDatabase] = None
         self.users: Optional[Collection] = None
         self.settings: Optional[Collection] = None
+        self.channels: Optional[Collection] = None
         
         self._connect_with_retry(max_retries, retry_delay)
         
@@ -55,6 +56,7 @@ class Database:
                 self.db = self.client.get_database('ITsGOLU_db')
                 self.users = self.db['users']
                 self.settings = self.db['user_settings']
+                self.channels = self.db['authorized_channels']
                 
                 print(f"{Fore.GREEN}✓ MongoDB Connected Successfully!{Style.RESET_ALL}")
                 self._initialize_database()
@@ -129,6 +131,17 @@ class Database:
             index_results.append("expiry TTL index")
         except Exception as e:
             print(f"{Fore.YELLOW}⚠ Could not create expiry index: {str(e)}{Style.RESET_ALL}")
+
+        try:
+            # Compound index for authorized channels collection
+            self.channels.create_index(
+                [("bot_username", 1), ("channel_id", 1)],
+                unique=True,
+                name="channel_identity"
+            )
+            index_results.append("channels compound index")
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Could not create channels compound index: {str(e)}{Style.RESET_ALL}")
             
         return index_results
 
@@ -293,6 +306,7 @@ class Database:
         except Exception as e:
             print(f"{Fore.RED}Admin check error: {str(e)}{Style.RESET_ALL}")
             return False
+
     def get_log_channel(self, bot_username: str):
         """Get the log channel ID for a specific bot"""
         try:
@@ -316,6 +330,157 @@ class Database:
         except Exception as e:
             print(f"Error setting log channel: {str(e)}")
             return False
+
+    # ═══════════════════════════════════════════════════════════
+    # CHANNEL MANAGEMENT METHODS
+    # ═══════════════════════════════════════════════════════════
+
+    def add_authorized_channel(self, bot_username: str, channel_id: int, 
+                               channel_title: str, added_by: int) -> bool:
+        """
+        Add an authorized channel to the database
+        
+        Args:
+            bot_username: Bot username
+            channel_id: Telegram channel ID (negative number)
+            channel_title: Channel title/name
+            added_by: User ID who added this channel
+            
+        Returns:
+            True if added successfully, False if already exists
+        """
+        try:
+            existing = self.channels.find_one({
+                "bot_username": bot_username,
+                "channel_id": channel_id
+            })
+            if existing:
+                print(f"{Fore.YELLOW}⚠ Channel {channel_id} already exists for bot {bot_username}{Style.RESET_ALL}")
+                return False
+
+            self.channels.insert_one({
+                "bot_username": bot_username,
+                "channel_id": channel_id,
+                "channel_title": channel_title,
+                "added_by": added_by,
+                "added_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            print(f"{Fore.GREEN}✓ Channel {channel_title} ({channel_id}) added for bot {bot_username}{Style.RESET_ALL}")
+            return True
+        except errors.DuplicateKeyError:
+            print(f"{Fore.YELLOW}⚠ Channel {channel_id} already exists (duplicate key){Style.RESET_ALL}")
+            return False
+        except Exception as e:
+            print(f"{Fore.RED}Add authorized channel error: {str(e)}{Style.RESET_ALL}")
+            return False
+
+    def remove_authorized_channel(self, bot_username: str, channel_id: int) -> bool:
+        """
+        Remove an authorized channel from the database
+        
+        Args:
+            bot_username: Bot username
+            channel_id: Telegram channel ID
+            
+        Returns:
+            True if removed, False if not found
+        """
+        try:
+            result = self.channels.delete_one({
+                "bot_username": bot_username,
+                "channel_id": channel_id
+            })
+            if result.deleted_count > 0:
+                print(f"{Fore.GREEN}✓ Channel {channel_id} removed for bot {bot_username}{Style.RESET_ALL}")
+                return True
+            else:
+                print(f"{Fore.YELLOW}⚠ Channel {channel_id} not found for bot {bot_username}{Style.RESET_ALL}")
+                return False
+        except Exception as e:
+            print(f"{Fore.RED}Remove authorized channel error: {str(e)}{Style.RESET_ALL}")
+            return False
+
+    def is_channel_authorized(self, bot_username: str, channel_id: int) -> bool:
+        """
+        Check if a channel is authorized for a specific bot
+        
+        Args:
+            bot_username: Bot username
+            channel_id: Telegram channel ID
+            
+        Returns:
+            True if channel is authorized, False otherwise
+        """
+        try:
+            doc = self.channels.find_one({
+                "bot_username": bot_username,
+                "channel_id": channel_id
+            })
+            return doc is not None
+        except Exception as e:
+            print(f"{Fore.RED}Channel authorization check error: {str(e)}{Style.RESET_ALL}")
+            return False
+
+    def get_all_authorized_channels(self, bot_username: str) -> List[int]:
+        """
+        Get all authorized channel IDs for a specific bot
+        
+        Args:
+            bot_username: Bot username
+            
+        Returns:
+            List of channel IDs
+        """
+        try:
+            cursor = self.channels.find(
+                {"bot_username": bot_username},
+                {"channel_id": 1, "_id": 0}
+            )
+            return [doc["channel_id"] for doc in cursor]
+        except Exception as e:
+            print(f"{Fore.RED}Get all authorized channels error: {str(e)}{Style.RESET_ALL}")
+            return []
+
+    def get_all_channels_info(self, bot_username: str) -> List[dict]:
+        """
+        Get full info of all authorized channels for a specific bot
+        
+        Args:
+            bot_username: Bot username
+            
+        Returns:
+            List of channel document dicts
+        """
+        try:
+            return list(self.channels.find(
+                {"bot_username": bot_username},
+                {"_id": 0}
+            ))
+        except Exception as e:
+            print(f"{Fore.RED}Get all channels info error: {str(e)}{Style.RESET_ALL}")
+            return []
+
+    def get_channel_info(self, bot_username: str, channel_id: int) -> Optional[dict]:
+        """
+        Get info of a single authorized channel
+        
+        Args:
+            bot_username: Bot username
+            channel_id: Telegram channel ID
+            
+        Returns:
+            Channel document dict or None if not found
+        """
+        try:
+            return self.channels.find_one(
+                {"bot_username": bot_username, "channel_id": channel_id},
+                {"_id": 0}
+            )
+        except Exception as e:
+            print(f"{Fore.RED}Get channel info error: {str(e)}{Style.RESET_ALL}")
+            return None
+
+    # ═══════════════════════════════════════════════════════════
             
     def list_bot_usernames(self) -> List[str]:
         """
